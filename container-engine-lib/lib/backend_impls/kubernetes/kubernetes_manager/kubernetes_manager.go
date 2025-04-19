@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/object_attributes_provider/kubernetes_label_key"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/concurrent_writer"
@@ -1683,6 +1684,231 @@ func (manager *KubernetesManager) GetPodsManagedByDeployment(ctx context.Context
 	return podsManagedByDeployment, nil
 }
 
+// ---------------------------stateful set---------------------------------------------------------------------------------------
+
+func (manager *KubernetesManager) CreateStatefulSet(
+	ctx context.Context,
+	namespaceName string,
+	statefulSetName string,
+	statefulSetLabels map[string]string,
+	statefulSetAnnotations map[string]string,
+	volumeClaimTemplates []apiv1.PersistentVolumeClaim,
+	persistentVolumeClaimRetentionPolicy *v1.StatefulSetPersistentVolumeClaimRetentionPolicy,
+	initContainers []apiv1.Container,
+	containers []apiv1.Container,
+	volumes []apiv1.Volume,
+	serviceAccountName string,
+	restartPolicy apiv1.RestartPolicy,
+	tolerations []apiv1.Toleration,
+	nodeSelector map[string]string,
+	affinity *apiv1.Affinity,
+) (*v1.StatefulSet, error) {
+	client := manager.kubernetesClientSet.AppsV1().StatefulSets(namespaceName)
+
+	statefulSetMeta := metav1.ObjectMeta{
+		Name:            statefulSetName,
+		GenerateName:    "",
+		Namespace:       namespaceName,
+		SelfLink:        "",
+		UID:             "",
+		ResourceVersion: "",
+		Generation:      0,
+		CreationTimestamp: metav1.Time{
+			Time: time.Time{},
+		},
+		DeletionTimestamp:          nil,
+		DeletionGracePeriodSeconds: nil,
+		Labels:                     statefulSetLabels,
+		Annotations:                statefulSetAnnotations,
+		OwnerReferences:            nil,
+		Finalizers:                 nil,
+		ManagedFields:              nil,
+	}
+
+	numReplicas := int32(1)
+	statefulSetSpec := v1.StatefulSetSpec{
+		Replicas: &numReplicas,
+		Selector: &metav1.LabelSelector{
+			MatchLabels:      statefulSetLabels,
+			MatchExpressions: nil,
+		},
+		VolumeClaimTemplates:                 volumeClaimTemplates,
+		PersistentVolumeClaimRetentionPolicy: persistentVolumeClaimRetentionPolicy,
+		Template: apiv1.PodTemplateSpec{
+			ObjectMeta: statefulSetMeta,
+			Spec: apiv1.PodSpec{
+				ShareProcessNamespace:         nil,
+				Volumes:                       volumes,
+				InitContainers:                initContainers,
+				Containers:                    containers,
+				EphemeralContainers:           nil,
+				RestartPolicy:                 restartPolicy,
+				TerminationGracePeriodSeconds: nil,
+				ActiveDeadlineSeconds:         nil,
+				DNSPolicy:                     "",
+				NodeSelector:                  nodeSelector,
+				ServiceAccountName:            serviceAccountName,
+				DeprecatedServiceAccount:      "",
+				AutomountServiceAccountToken:  nil,
+				NodeName:                      "",
+				HostNetwork:                   false,
+				HostPID:                       false,
+				HostIPC:                       false,
+				SecurityContext:               nil,
+				ImagePullSecrets:              nil,
+				Hostname:                      "",
+				Subdomain:                     "",
+				Affinity:                      affinity,
+				SchedulerName:                 "",
+				Tolerations:                   tolerations,
+				HostAliases:                   nil,
+				PriorityClassName:             "",
+				Priority:                      nil,
+				DNSConfig:                     nil,
+				ReadinessGates:                nil,
+				RuntimeClassName:              nil,
+				EnableServiceLinks:            nil,
+				PreemptionPolicy:              nil,
+				Overhead:                      nil,
+				TopologySpreadConstraints:     nil,
+				SetHostnameAsFQDN:             nil,
+				OS:                            nil,
+				HostUsers:                     nil,
+				SchedulingGates:               nil,
+				ResourceClaims:                nil,
+			},
+		},
+		MinReadySeconds:      0,
+		RevisionHistoryLimit: nil,
+	}
+
+	statefulSetToCreate := &v1.StatefulSet{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "",
+			APIVersion: "",
+		},
+		ObjectMeta: statefulSetMeta,
+		Spec:       statefulSetSpec,
+		Status: v1.StatefulSetStatus{
+			ObservedGeneration: 0,
+			CollisionCount:     nil,
+			Conditions:         nil,
+			ReadyReplicas:      0,
+			Replicas:           0,
+			UpdatedReplicas:    0,
+			AvailableReplicas:  0,
+		},
+	}
+
+	if statefulSetDefinitionBytes, err := json.Marshal(statefulSetToCreate); err != nil {
+		return nil, stacktrace.Propagate(err, "An error occurred marshaling stateful set object for '%v' into json.", statefulSetName)
+	} else {
+		logrus.Debugf("Going to start stateful set using the following JSON: %v", string(statefulSetDefinitionBytes))
+	}
+
+	createdStatefulSet, err := client.Create(ctx, statefulSetToCreate, globalCreateOptions)
+	if err != nil {
+		return nil, stacktrace.Propagate(err, "An error occurred while creating stateful set.")
+	}
+
+	return createdStatefulSet, nil
+}
+
+func (manager *KubernetesManager) RemoveStatefulSet(ctx context.Context, statefulSet *v1.StatefulSet) error {
+	client := manager.kubernetesClientSet.AppsV1().StatefulSets(statefulSet.Namespace)
+
+	if err := client.Delete(ctx, statefulSet.Name, globalDeleteOptions); err != nil {
+		return stacktrace.Propagate(err, "Failed to delete stateful set with name '%s' with delete options '%+v'", statefulSet.Name, globalDeleteOptions)
+	}
+
+	// TODO: maybe add a termination wait here?
+	return nil
+}
+
+func (manager *KubernetesManager) GetStatefulSet(ctx context.Context, namespace string, name string) (*v1.StatefulSet, error) {
+	client := manager.kubernetesClientSet.AppsV1().StatefulSets(namespace)
+
+	statefulSet, err := client.Get(ctx, name, metav1.GetOptions{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "",
+			APIVersion: "",
+		},
+		ResourceVersion: "",
+	})
+	if apierrors.IsNotFound(err) {
+		return nil, nil // in the case the deployment doesn't exist, simply return a nil object
+	}
+	if err != nil {
+		return nil, stacktrace.Propagate(err, "Failed to get stateful set with name '%s'", name)
+	}
+
+	return statefulSet, nil
+}
+
+func (manager *KubernetesManager) WaitForPodManagedByStatefulSet(ctx context.Context, statefulSet *v1.StatefulSet, maxRetries int, retryInterval time.Duration) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(maxRetries)*retryInterval)
+	defer cancel()
+
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		select {
+		case <-timeoutCtx.Done():
+			return stacktrace.NewError(
+				"Timeout waiting for a pod managed by stateful set '%s' to come online",
+				statefulSet.Name,
+			)
+		case <-ticker.C:
+			pods, err := manager.GetPodsManagedByStatefulSet(ctx, statefulSet)
+			if err != nil {
+				return stacktrace.Propagate(err, "An error occurred getting pods managed by stateful set '%v'", statefulSet.Name)
+			}
+			if len(pods) > 0 && len(pods[0].Status.ContainerStatuses) > 0 && pods[0].Status.ContainerStatuses[0].Ready {
+				// found a pod with a running container
+				return nil
+			}
+		}
+	}
+	return stacktrace.NewError(
+		"Exceeded max retries (%d) waiting for a pod managed by stateful set '%s' to come online",
+		maxRetries, statefulSet.Name,
+	)
+}
+
+func (manager *KubernetesManager) GetPodsManagedByStatefulSet(ctx context.Context, statefulSet *v1.StatefulSet) ([]*apiv1.Pod, error) {
+	podsClient := manager.kubernetesClientSet.CoreV1().Pods(statefulSet.Namespace)
+
+	selector := metav1.FormatLabelSelector(statefulSet.Spec.Selector)
+
+	pods, err := podsClient.List(ctx, metav1.ListOptions{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "",
+			APIVersion: "",
+		},
+		LabelSelector:        selector,
+		FieldSelector:        "",
+		Watch:                false,
+		AllowWatchBookmarks:  false,
+		ResourceVersion:      "",
+		ResourceVersionMatch: "",
+		TimeoutSeconds:       nil,
+		Limit:                0,
+		Continue:             "",
+		SendInitialEvents:    nil,
+	})
+	if err != nil {
+		return nil, stacktrace.Propagate(err, "An error occurred retrieving list of pods in namespace '%v' with label selectors: %v.", statefulSet.Namespace, selector)
+	}
+
+	var podsManagedByStatefulSet []*apiv1.Pod
+	for _, pod := range pods.Items {
+		podToAdd := pod
+		podsManagedByStatefulSet = append(podsManagedByStatefulSet, &podToAdd)
+	}
+
+	return podsManagedByStatefulSet, nil
+}
+
 // ---------------------------config map---------------------------------------------------------------------------------------
 func (manager *KubernetesManager) RemoveConfigMap(ctx context.Context, namespace string, configMap *apiv1.ConfigMap) error {
 	client := manager.kubernetesClientSet.CoreV1().ConfigMaps(namespace)
@@ -2367,6 +2593,18 @@ func (manager *KubernetesManager) GetDeploymentsByLabels(ctx context.Context, na
 	}
 
 	return deployment, nil
+}
+
+func (manager *KubernetesManager) GetStatefulSetsByLabels(ctx context.Context, namespace string, statefulSetLabels map[string]string) (*v1.StatefulSetList, error) {
+	statefulSetClient := manager.kubernetesClientSet.AppsV1().StatefulSets(namespace)
+
+	opts := buildListOptionsFromLabels(statefulSetLabels)
+	statefulSets, err := statefulSetClient.List(ctx, opts)
+	if err != nil {
+		return nil, stacktrace.Propagate(err, "Expected to be able to get stateful set with labels '%+v', instead a non-nil error was returned", statefulSetLabels)
+	}
+
+	return statefulSets, nil
 }
 
 func (manager *KubernetesManager) GetConfigMapByLabels(ctx context.Context, namespace string, configMapLabels map[string]string) (*apiv1.ConfigMapList, error) {

@@ -30,6 +30,7 @@ import (
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/service"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/concurrent_writer"
 	"github.com/kurtosis-tech/stacktrace"
+	v1 "k8s.io/api/apps/v1"
 
 	"github.com/sirupsen/logrus"
 	apiv1 "k8s.io/api/core/v1"
@@ -141,7 +142,7 @@ type UserServiceKubernetesResources struct {
 	Service *apiv1.Service
 
 	// This can be nil if the user hasn't started a pod for the service yet, or if the pod was deleted
-	Pod *apiv1.Pod
+	StatefulSet *v1.StatefulSet
 
 	// This can be nil if the user hasn't started the service yet, or if the ingress was deleted
 	Ingress *netv1.Ingress
@@ -217,7 +218,7 @@ func GetMatchingUserServiceObjectsAndKubernetesResources(
 		logrus.Tracef("Found resources for service '%v': %+v", serviceUuid, serviceResources)
 	}
 
-	allObjectsAndResources, err := GetUserServiceObjectsFromKubernetesResources(enclaveId, allResources)
+	allObjectsAndResources, err := GetUserServiceObjectsFromKubernetesResources(ctx, enclaveId, allResources, kubernetesManager)
 	if err != nil {
 		return nil, stacktrace.Propagate(err, "An error occurred getting user service objects from Kubernetes resources")
 	}
@@ -326,9 +327,9 @@ func GetUserServiceKubernetesResourcesMatchingGuids(
 		resultObj, found := results[serviceUuid]
 		if !found {
 			resultObj = &UserServiceKubernetesResources{
-				Service: nil,
-				Pod:     nil,
-				Ingress: nil,
+				Service:     nil,
+				StatefulSet: nil,
+				Ingress:     nil,
 			}
 		}
 		resultObj.Service = kubernetesService
@@ -336,7 +337,7 @@ func GetUserServiceKubernetesResourcesMatchingGuids(
 	}
 
 	// Get k8s pods
-	matchingKubernetesPods, err := kubernetes_resource_collectors.CollectMatchingPods(
+	matchingKubernetesStatefulSets, err := kubernetes_resource_collectors.CollectMatchingStatefulSets(
 		ctx,
 		kubernetesManager,
 		namespaceName,
@@ -347,30 +348,30 @@ func GetUserServiceKubernetesResourcesMatchingGuids(
 	if err != nil {
 		return nil, stacktrace.Propagate(err, "An error occurred getting Kubernetes pods matching service UUIDs: %+v", serviceUuids)
 	}
-	for serviceGuidStr, kubernetesPodsForGuid := range matchingKubernetesPods {
-		logrus.Tracef("Found Kubernetes pods for GUID '%v': %+v", serviceGuidStr, kubernetesPodsForGuid)
+	for serviceGuidStr, kubernetesStatefulSetsForGuid := range matchingKubernetesStatefulSets {
+		logrus.Tracef("Found Kubernetes stateful sets for GUID '%v': %+v", serviceGuidStr, kubernetesStatefulSetsForGuid)
 		serviceUuid := service.ServiceUUID(serviceGuidStr)
 
-		numPodsForGuid := len(kubernetesPodsForGuid)
-		if numPodsForGuid > 1 {
-			return nil, stacktrace.NewError("Found %v Kubernetes pods associated with service GUID '%v'; this is a bug in Kurtosis", numPodsForGuid, serviceUuid)
-		} else if numPodsForGuid == 1 {
-			kubernetesPod := kubernetesPodsForGuid[0]
+		numStatefulSetsForGuid := len(kubernetesStatefulSetsForGuid)
+		if numStatefulSetsForGuid > 1 {
+			return nil, stacktrace.NewError("Found %v Kubernetes stateful sets associated with service GUID '%v'; this is a bug in Kurtosis", numStatefulSetsForGuid, serviceUuid)
+		} else if numStatefulSetsForGuid == 1 {
+			statefulSet := kubernetesStatefulSetsForGuid[0]
 
-			numContainersForPod := len(kubernetesPod.Spec.Containers)
-			if numContainersForPod != 1 {
-				return nil, stacktrace.NewError("Found %v containers associated with service GUID '%v'; this is a bug in Kurtosis", numContainersForPod, serviceUuid)
+			numContainersForStatefulSet := len(statefulSet.Spec.Template.Spec.Containers)
+			if numContainersForStatefulSet != 1 {
+				return nil, stacktrace.NewError("Found %v containers associated with service GUID '%v'; this is a bug in Kurtosis", numContainersForStatefulSet, serviceUuid)
 			}
 
 			resultObj, found := results[serviceUuid]
 			if !found {
 				resultObj = &UserServiceKubernetesResources{
-					Service: nil,
-					Pod:     nil,
-					Ingress: nil,
+					Service:     nil,
+					StatefulSet: nil,
+					Ingress:     nil,
 				}
 			}
-			resultObj.Pod = kubernetesPod
+			resultObj.StatefulSet = statefulSet
 			results[serviceUuid] = resultObj
 		}
 	}
@@ -400,9 +401,9 @@ func GetUserServiceKubernetesResourcesMatchingGuids(
 		resultObj, found := results[serviceUuid]
 		if !found {
 			resultObj = &UserServiceKubernetesResources{
-				Service: nil,
-				Pod:     nil,
-				Ingress: nil,
+				Service:     nil,
+				StatefulSet: nil,
+				Ingress:     nil,
 			}
 		}
 		resultObj.Ingress = kubernetesIngress
@@ -413,8 +414,10 @@ func GetUserServiceKubernetesResourcesMatchingGuids(
 }
 
 func GetUserServiceObjectsFromKubernetesResources(
+	ctx context.Context,
 	enclaveId enclave.EnclaveUUID,
 	allKubernetesResources map[service.ServiceUUID]*UserServiceKubernetesResources,
+	kubernetesManager *kubernetes_manager.KubernetesManager,
 ) (map[service.ServiceUUID]*UserServiceObjectsAndKubernetesResources, error) {
 	results := map[service.ServiceUUID]*UserServiceObjectsAndKubernetesResources{}
 	for serviceUuid, resources := range allKubernetesResources {
@@ -428,7 +431,7 @@ func GetUserServiceObjectsFromKubernetesResources(
 	for serviceUuid, resultObj := range results {
 		resourcesToParse := resultObj.KubernetesResources
 		kubernetesService := resourcesToParse.Service
-		kubernetesPod := resourcesToParse.Pod
+		kubernetesStatefulSets := resourcesToParse.StatefulSet
 
 		if kubernetesService == nil {
 			return nil, stacktrace.NewError(
@@ -476,7 +479,7 @@ func GetUserServiceObjectsFromKubernetesResources(
 			return nil, stacktrace.Propagate(err, "An error occurred deserializing private ports from the user service's Kubernetes service")
 		}
 
-		if kubernetesPod == nil {
+		if kubernetesStatefulSets == nil {
 			// No pod here means that a) a Service had private ports but b) now has no Pod
 			// This means that there  used to be a Pod but it was stopped/removed
 			resultObj.Service = service.NewService(
@@ -494,12 +497,21 @@ func GetUserServiceObjectsFromKubernetesResources(
 			continue
 		}
 
-		containerStatus, err := GetContainerStatusFromPod(resourcesToParse.Pod)
+		pods, err := kubernetesManager.GetPodsManagedByStatefulSet(ctx, resourcesToParse.StatefulSet)
 		if err != nil {
-			return nil, stacktrace.Propagate(err, "An error occurred getting container status from Kubernetes pod '%+v'", resourcesToParse.Pod)
+			return nil, stacktrace.Propagate(err, "An error occurred getting pods managed by stateful set '%+v'", resourcesToParse.StatefulSet)
 		}
 
-		podContainer := resourcesToParse.Pod.Spec.Containers[0]
+		if len(pods) != 1 {
+			return nil, stacktrace.NewError("Found %d pods managed by stateful set %s when there should only be 1. This is likely a Kurtosis bug!", len(pods), resourcesToParse.StatefulSet.Name)
+		}
+
+		containerStatus, err := GetContainerStatusFromPod(pods[0])
+		if err != nil {
+			return nil, stacktrace.Propagate(err, "An error occurred getting container status from Kubernetes pod '%+v'", pods[0])
+		}
+
+		podContainer := resourcesToParse.StatefulSet.Spec.Template.Spec.Containers[0]
 		podContainerEnvVars := map[string]string{}
 		for _, env := range podContainer.Env {
 			podContainerEnvVars[env.Name] = env.Value

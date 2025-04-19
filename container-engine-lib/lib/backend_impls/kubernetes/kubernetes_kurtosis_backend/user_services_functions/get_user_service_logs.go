@@ -2,12 +2,13 @@ package user_services_functions
 
 import (
 	"context"
+	"io"
+
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_kurtosis_backend/shared_helpers"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_manager"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/enclave"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/service"
 	"github.com/kurtosis-tech/stacktrace"
-	"io"
 )
 
 const (
@@ -33,14 +34,23 @@ func GetUserServiceLogs(
 	shouldCloseLogStreams := true
 	for _, serviceObjectAndResource := range serviceObjectsAndResources {
 		serviceUuid := serviceObjectAndResource.Service.GetRegistration().GetUUID()
-		servicePod := serviceObjectAndResource.KubernetesResources.Pod
-		if servicePod == nil {
-			erredServiceLogs[serviceUuid] = stacktrace.NewError("Expected to find a pod for Kurtosis service with UUID '%v', instead no pod was found", serviceUuid)
-			continue
+
+		statefulSet := serviceObjectAndResource.KubernetesResources.StatefulSet
+
+		pods, err := kubernetesManager.GetPodsManagedByStatefulSet(ctx, statefulSet)
+		if err != nil {
+			return nil, nil, stacktrace.Propagate(err, "An error occurred getting pods managed by stateful set '%+v'", statefulSet)
 		}
+
+		if len(pods) != 1 {
+			return nil, nil, stacktrace.NewError("Found %d pods managed by stateful set %s when there should only be 1. This is likely a Kurtosis bug!", len(pods), statefulSet.Name)
+		}
+
+		pod := pods[0]
+
 		serviceNamespaceName := serviceObjectAndResource.KubernetesResources.Service.GetNamespace()
 		// Get logs
-		logReadCloser, err := kubernetesManager.GetContainerLogs(ctx, serviceNamespaceName, servicePod.Name, userServiceContainerName, shouldFollowLogs, shouldAddTimestampsToUserServiceLogs)
+		logReadCloser, err := kubernetesManager.GetContainerLogs(ctx, serviceNamespaceName, pod.Name, userServiceContainerName, shouldFollowLogs, shouldAddTimestampsToUserServiceLogs)
 		if err != nil {
 			erredServiceLogs[serviceUuid] = stacktrace.Propagate(err, "Expected to be able to call Kubernetes to get logs for service with UUID '%v', instead a non-nil error was returned", serviceUuid)
 			continue

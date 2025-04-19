@@ -2,6 +2,7 @@ package user_services_functions
 
 import (
 	"context"
+
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_kurtosis_backend/shared_helpers"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_manager"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/enclave"
@@ -32,13 +33,13 @@ func StopUserServices(
 	for serviceUuid, serviceObjsAndResources := range allObjectsAndResources {
 		resources := serviceObjsAndResources.KubernetesResources
 
-		pod := resources.Pod
-		if pod != nil {
-			if err := kubernetesManager.RemovePod(ctx, pod); err != nil {
+		statefulSet := resources.StatefulSet
+		if statefulSet != nil {
+			if err := kubernetesManager.RemoveStatefulSet(ctx, statefulSet); err != nil {
 				erroredUuids[serviceUuid] = stacktrace.Propagate(
 					err,
-					"An error occurred removing Kubernetes pod '%v' in namespace '%v'",
-					pod.Name,
+					"An error occurred removing Kubernetes stateful set '%v' in namespace '%v'",
+					statefulSet.Name,
 					namespaceName,
 				)
 				continue

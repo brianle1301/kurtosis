@@ -92,10 +92,21 @@ func runExecOperationsInParallel(namespaceName string, commandArgs map[service.S
 			continue
 		}
 
-		userServiceKubernetesPod := userServiceKubernetesResource.KubernetesResources.Pod
+		userServiceKubernetesStatefulSet := userServiceKubernetesResource.KubernetesResources.StatefulSet
+
+		pods, err := kubernetesManager.GetPodsManagedByStatefulSet(ctx, userServiceKubernetesStatefulSet)
+		if err != nil {
+			return nil, nil, stacktrace.Propagate(err, "An error occurred getting pods managed by stateful set '%+v'", userServiceKubernetesStatefulSet)
+		}
+
+		if len(pods) != 1 {
+			return nil, nil, stacktrace.NewError("Found %d pods managed by stateful set %s when there should only be 1. This is likely a Kurtosis bug!", len(pods), userServiceKubernetesStatefulSet.Name)
+		}
+
+		pod := pods[0]
 
 		execOperationId := operation_parallelizer.OperationID(serviceUuid)
-		execOperation := createExecOperation(namespaceName, serviceUuid, userServiceKubernetesPod, commandArg, kubernetesManager, ctx)
+		execOperation := createExecOperation(namespaceName, serviceUuid, pod, commandArg, kubernetesManager, ctx)
 		execOperations[execOperationId] = execOperation
 	}
 

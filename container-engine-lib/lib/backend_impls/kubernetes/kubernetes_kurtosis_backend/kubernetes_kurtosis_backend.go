@@ -412,7 +412,19 @@ func (backend *KubernetesKurtosisBackend) GetShellOnUserService(ctx context.Cont
 	if err != nil {
 		return stacktrace.Propagate(err, "An error occurred getting user service object & Kubernetes resources for service '%v' in enclave '%v'", serviceUuid, enclaveUuid)
 	}
-	pod := objectAndResources.KubernetesResources.Pod
+
+	statefulSet := objectAndResources.KubernetesResources.StatefulSet
+
+	pods, err := backend.kubernetesManager.GetPodsManagedByStatefulSet(ctx, statefulSet)
+	if err != nil {
+		return stacktrace.Propagate(err, "An error occurred getting pods managed by stateful set '%+v'", statefulSet)
+	}
+
+	if len(pods) != 1 {
+		return stacktrace.NewError("Found %d pods managed by stateful set %s when there should only be 1. This is likely a Kurtosis bug!", len(pods), statefulSet.Name)
+	}
+
+	pod := pods[0]
 	return backend.kubernetesManager.GetExecStream(ctx, pod)
 }
 

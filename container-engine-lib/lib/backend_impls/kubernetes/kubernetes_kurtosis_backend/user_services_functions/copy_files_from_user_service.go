@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"path/filepath"
+
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_kurtosis_backend/shared_helpers"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_manager"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/enclave"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/service"
 	"github.com/kurtosis-tech/stacktrace"
-	"io"
 	apiv1 "k8s.io/api/core/v1"
-	"path/filepath"
 )
 
 const (
@@ -43,7 +44,20 @@ func CopyFilesFromUserService(
 	if err != nil {
 		return stacktrace.Propagate(err, "An error occurred getting user service object & Kubernetes resources for service '%v' in enclave '%v'", serviceUuid, enclaveId)
 	}
-	pod := objectAndResources.KubernetesResources.Pod
+
+	statefulSet := objectAndResources.KubernetesResources.StatefulSet
+
+	pods, err := kubernetesManager.GetPodsManagedByStatefulSet(ctx, statefulSet)
+	if err != nil {
+		return stacktrace.Propagate(err, "An error occurred getting pods managed by stateful set '%+v'", statefulSet)
+	}
+
+	if len(pods) != 1 {
+		return stacktrace.NewError("Found %d pods managed by stateful set %s when there should only be 1. This is likely a Kurtosis bug!", len(pods), statefulSet.Name)
+	}
+
+	pod := pods[0]
+
 	if pod == nil {
 		return stacktrace.NewError(
 			"Cannot copy path '%v' on service '%v' in enclave '%v' because no pod exists for the service",
