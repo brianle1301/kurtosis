@@ -3,6 +3,8 @@ package user_services_functions
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_download_mode"
 	v1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,6 +51,9 @@ const (
 	unboundPortNumber = 1
 
 	unlimitedReplacements = -1
+
+	maxRetries    = 30
+	retryInterval = 1 * time.Second
 )
 
 // Completeness enforced via unit test
@@ -459,7 +464,6 @@ func createStartServiceOperation(
 			podContainers,
 			podVolumes,
 			userServiceServiceAccountName,
-			restartPolicy,
 			tolerations,
 			nodeSelectors,
 			nil,
@@ -478,6 +482,10 @@ func createStartServiceOperation(
 				logrus.Errorf("ACTION REQUIRED: You'll need to remove stateful set '%v' in '%v' manually!!!", createdStatefulSet, namespaceName)
 			}
 		}()
+
+		if err := kubernetesManager.WaitForPodManagedByStatefulSet(ctx, createdStatefulSet, maxRetries, retryInterval); err != nil {
+			return nil, stacktrace.Propagate(err, "An error occurred waiting for active pod managed by stateful set '%v'", createdStatefulSet.Name)
+		}
 
 		// Create the ingress for the reverse proxy
 		ingressAttributes, err := enclaveObjAttributesProvider.ForUserServiceIngress(serviceUuid, serviceName, privatePorts)

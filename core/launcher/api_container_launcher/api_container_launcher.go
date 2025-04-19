@@ -7,6 +7,7 @@ package api_container_launcher
 import (
 	"context"
 	"fmt"
+
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/api_container"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/enclave"
@@ -21,7 +22,7 @@ const (
 	enclaveDataVolumeDirpath = "/kurtosis-data"
 
 	// TODO This should come from the same logic that builds the server image!!!!!
-	containerImage = "kurtosistech/core"
+	containerImage = "ble130104/core"
 )
 
 type ApiContainerLauncher struct {

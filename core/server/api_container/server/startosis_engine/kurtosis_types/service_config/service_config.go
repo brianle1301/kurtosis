@@ -2,6 +2,9 @@ package service_config
 
 import (
 	"fmt"
+	"math"
+	"path"
+
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_build_spec"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_download_mode"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_registry_spec"
@@ -24,8 +27,6 @@ import (
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/startosis_packages"
 	"go.starlark.net/starlark"
 	v1 "k8s.io/api/core/v1"
-	"math"
-	"path"
 )
 
 const (
@@ -57,7 +58,7 @@ const (
 
 	filesArtifactExpansionDirsParentDirpath string = "/files-artifacts"
 	// TODO This should be populated from the build flow that builds the files-artifacts-expander Docker image
-	filesArtifactsExpanderImage string = "kurtosistech/files-artifacts-expander"
+	filesArtifactsExpanderImage string = "ble130104/files-artifacts-expander"
 
 	minimumMemoryAllocationMegabytes = 6
 )

@@ -28,6 +28,7 @@ const (
 	DaemonSetsKubernetesResource             = "daemonsets"
 	DeploymentsKubernetesResource            = "deployments"
 	DeploymentsScaleKubernetesResource       = "deployments/scale"
+	StatefulSetsKubernetesResource           = "statefulsets"
 
 	ClusterRoleKubernetesResourceType = "ClusterRole"
 	RoleKubernetesResourceType        = "Role"
