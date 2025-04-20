@@ -3,13 +3,12 @@ package user_services_functions
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_download_mode"
 	v1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"strings"
 
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/service_user"
 
@@ -364,6 +363,7 @@ func createStartServiceOperation(
 
 		shouldDestroyPersistentVolumesAndClaims := true
 		createVolumesWithClaims := map[string]*kubernetesVolumeWithClaim{}
+		logrus.Infof("Persistent directories: %+v", persistentDirectories)
 		if persistentDirectories != nil {
 			createVolumesWithClaims, err = preparePersistentDirectoriesResources(
 				ctx,
@@ -399,6 +399,11 @@ func createStartServiceOperation(
 		}
 		statefulSetLabelsStrs := shared_helpers.GetStringMapFromLabelMap(statefulSetAttrs.GetLabels())
 		statefulSetAnnotationsStrs := shared_helpers.GetStringMapFromAnnotationMap(statefulSetAttrs.GetAnnotations())
+
+		userServiceContainerVolumeMounts = append(userServiceContainerVolumeMounts, apiv1.VolumeMount{
+			Name:      "data",
+			MountPath: "/data",
+		})
 
 		podContainers, err := getUserServicePodContainerSpecs(
 			containerImageName,
