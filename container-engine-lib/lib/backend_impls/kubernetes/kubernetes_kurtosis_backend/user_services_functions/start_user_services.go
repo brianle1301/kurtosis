@@ -51,7 +51,7 @@ const (
 
 	unlimitedReplacements = -1
 
-	maxRetries    = 30
+	maxRetries    = 120
 	retryInterval = 1 * time.Second
 )
 

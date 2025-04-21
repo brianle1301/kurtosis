@@ -489,7 +489,7 @@ func restApiServer(
 	loggingApi.RegisterHandlers(echoApiRouter, webSocketRuntime)
 
 	// ============================== Engine Management API ======================================
-	enclaveRuntime, err := server.NewEnclaveRuntime(ctx, *enclave_manager, asyncStarlarkLogs, false)
+	enclaveRuntime, err := server.NewEnclaveRuntime(ctx, *enclave_manager, asyncStarlarkLogs, serverArgs.KurtosisBackendType, false)
 	if err != nil {
 		newErr := stacktrace.Propagate(err, "Failed to initialize %T", enclaveRuntime)
 		return newErr
