@@ -52,6 +52,16 @@ const (
     Read_from_Head    true
     Refresh_Interval  10
 
+[INPUT]
+    Name              tail
+    Tag               kurtosis.*
+    Path              /var/log/containers/*_kt-*_{{ .UserServiceResourceStr }}-kurtosis-core-api-*.log
+    Parser            docker
+    DB                {{ .CheckpointDbMountPath }}/fluent-bit.db
+    DB.sync           normal
+    Read_from_Head    true
+    Refresh_Interval  10
+
 [FILTER]
     Name              kubernetes
     Match             *
