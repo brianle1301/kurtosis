@@ -1,10 +1,8 @@
 package fluentbit
 
-type FluentbitConfig struct {
-	Service *Service
-	Input   *Input
-	Output  *Output
-}
+import (
+	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/logs_collector"
+)
 
 type Service struct {
 	LogLevel          string
@@ -28,11 +26,19 @@ type Output struct {
 	Port  uint16
 }
 
-func newDefaultFluentbitConfigForKurtosisCentralizedLogs(
+type FluentbitConfig struct {
+	Service *Service
+	Input   *Input
+	Filters []logs_collector.Filter
+	Output  *Output
+}
+
+func newFluentbitConfigForKurtosisCentralizedLogs(
 	logsAggregatorHost string,
 	logsAggregatorPort uint16,
 	tcpPortNumber uint16,
 	httpPortNumber uint16,
+	logsCollectorFilters []logs_collector.Filter,
 ) *FluentbitConfig {
 	return &FluentbitConfig{
 		Service: &Service{
@@ -48,6 +54,7 @@ func newDefaultFluentbitConfigForKurtosisCentralizedLogs(
 			Port:        tcpPortNumber,
 			StorageType: inputFilesystemStorageType,
 		},
+		Filters: logsCollectorFilters,
 		Output: &Output{
 			Name:  vectorOutputTypeName,
 			Match: matchAllRegex,

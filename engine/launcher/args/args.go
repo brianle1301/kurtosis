@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/logs_collector"
 	"github.com/kurtosis-tech/kurtosis/metrics-library/golang/lib/metrics_client"
 
 	"github.com/kurtosis-tech/kurtosis/engine/launcher/args/kurtosis_backend_config"
@@ -69,6 +70,8 @@ type EngineServerArgs struct {
 	Domain string `json:"domain"`
 
 	LogRetentionPeriod string `json:"logRetentionPeriod"`
+
+	LogsCollectorFilters []logs_collector.Filter `json:"logsCollectorFilters"`
 }
 
 var skipValidation = map[string]bool{
@@ -128,6 +131,7 @@ func NewEngineServerArgs(
 	restartAPIContainers bool,
 	domain string,
 	logRetentionPeriod string,
+	logsCollectorFilters []logs_collector.Filter,
 ) (*EngineServerArgs, error) {
 	if enclaveEnvVars == "" {
 		enclaveEnvVars = emptyJsonField
@@ -150,6 +154,7 @@ func NewEngineServerArgs(
 		RestartAPIContainers:        restartAPIContainers,
 		Domain:                      domain,
 		LogRetentionPeriod:          logRetentionPeriod,
+		LogsCollectorFilters:        logsCollectorFilters,
 	}
 	if err := result.validate(); err != nil {
 		return nil, stacktrace.Propagate(err, "An error occurred validating engine server args")
