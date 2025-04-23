@@ -3,6 +3,7 @@ package logs_aggregator_functions
 import (
 	"context"
 	"errors"
+
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_manager"
 	"github.com/kurtosis-tech/stacktrace"
 	"github.com/sirupsen/logrus"
@@ -27,7 +28,7 @@ func DestroyLogsAggregator(ctx context.Context, kubernetesManager *kubernetes_ma
 
 	var destroyErrs []error
 	if logsAggregatorResources.deployment != nil {
-		if err := kubernetesManager.RemoveDeployment(ctx, logsAggregatorNamespace.Name, logsAggregatorResources.deployment); err != nil {
+		if err := kubernetesManager.RemoveDeployment(ctx, logsAggregatorResources.deployment); err != nil {
 			destroyErrs = append(destroyErrs, stacktrace.Propagate(err, "An error occurred removing logs aggregator deployment."))
 		}
 	}

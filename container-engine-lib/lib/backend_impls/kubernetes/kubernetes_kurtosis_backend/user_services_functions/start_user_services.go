@@ -51,8 +51,8 @@ const (
 
 	unlimitedReplacements = -1
 
-	maxRetries    = 120
-	retryInterval = 1 * time.Second
+	statefulSetMaxRetries    = 60
+	statefulSetRetryInterval = 1 * time.Second
 )
 
 // Completeness enforced via unit test
@@ -488,7 +488,7 @@ func createStartServiceOperation(
 			}
 		}()
 
-		if err := kubernetesManager.WaitForPodManagedByStatefulSet(ctx, createdStatefulSet, maxRetries, retryInterval); err != nil {
+		if err := kubernetesManager.WaitForPodManagedByStatefulSet(ctx, createdStatefulSet, statefulSetMaxRetries, statefulSetRetryInterval); err != nil {
 			return nil, stacktrace.Propagate(err, "An error occurred waiting for active pod managed by stateful set '%v'", createdStatefulSet.Name)
 		}
 

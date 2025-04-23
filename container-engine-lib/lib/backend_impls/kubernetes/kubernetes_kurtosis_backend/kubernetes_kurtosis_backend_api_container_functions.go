@@ -8,6 +8,7 @@ import (
 
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_kurtosis_backend/consts"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_kurtosis_backend/shared_helpers"
+	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_manager"
 	kubernetes_manager_consts "github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_manager/consts"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_resource_collectors"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/object_attributes_provider/kubernetes_label_key"
@@ -17,6 +18,7 @@ import (
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/port_spec"
 	"github.com/kurtosis-tech/stacktrace"
 	"github.com/sirupsen/logrus"
+	v1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	applyconfigurationsv1 "k8s.io/client-go/applyconfigurations/core/v1"
@@ -40,6 +42,9 @@ const (
 	enclaveDataDirVolumeName = "enclave-data"
 
 	enclaveDataDirVolumeSize int64 = 1 * 1024 * 1024 * 1024 // 1g minimum size on Kubernetes
+
+	deploymentMaxRetries    = 60
+	deploymentRetryInterval = 1 * time.Second
 )
 
 var noWait *port_spec.Wait = nil
@@ -55,7 +60,7 @@ type apiContainerKubernetesResources struct {
 	// Will never be nil because an API container is defined by its service
 	service *apiv1.Service
 
-	pod *apiv1.Pod
+	deployment *v1.Deployment
 
 	role *rbacv1.Role
 
@@ -122,7 +127,7 @@ func (backend *KubernetesKurtosisBackend) CreateAPIContainer(
 	}
 
 	// Get Pod Attributes so that we can select them with the Service
-	apiContainerPodAttributes, err := apiContainerAttributesProvider.ForApiContainerPod()
+	apiContainerDeploymentAttributes, err := apiContainerAttributesProvider.ForApiContainerDeployment()
 	if err != nil {
 		return nil, stacktrace.Propagate(
 			err,
@@ -130,9 +135,9 @@ func (backend *KubernetesKurtosisBackend) CreateAPIContainer(
 			enclaveId,
 		)
 	}
-	apiContainerPodName := apiContainerPodAttributes.GetName().GetString()
-	apiContainerPodLabels := shared_helpers.GetStringMapFromLabelMap(apiContainerPodAttributes.GetLabels())
-	apiContainerPodAnnotations := shared_helpers.GetStringMapFromAnnotationMap(apiContainerPodAttributes.GetAnnotations())
+	apiContainerDeploymentName := apiContainerDeploymentAttributes.GetName().GetString()
+	apiContainerDeploymentLabels := shared_helpers.GetStringMapFromLabelMap(apiContainerDeploymentAttributes.GetLabels())
+	apiContainerDeploymentAnnotations := shared_helpers.GetStringMapFromAnnotationMap(apiContainerDeploymentAttributes.GetAnnotations())
 
 	// Get Service Attributes
 	apiContainerServiceAttributes, err := apiContainerAttributesProvider.ForApiContainerService(
@@ -164,7 +169,7 @@ func (backend *KubernetesKurtosisBackend) CreateAPIContainer(
 		apiContainerServiceName,
 		apiContainerServiceLabels,
 		apiContainerServiceAnnotations,
-		apiContainerPodLabels,
+		apiContainerDeploymentLabels,
 		apiv1.ServiceTypeClusterIP,
 		servicePorts,
 	)
@@ -478,67 +483,56 @@ func (backend *KubernetesKurtosisBackend) CreateAPIContainer(
 
 	apiContainerInitContainers := []apiv1.Container{}
 
-	// Data is always persistent we can always restart like Docker
-	apiContainerRestartPolicy := apiv1.RestartPolicyOnFailure
-
 	// Create pods with api container containers and volumes in Kubernetes
-	apiContainerPod, err := backend.kubernetesManager.CreatePod(
+	apiContainerDeployment, err := backend.kubernetesManager.CreateDeployment(
 		ctx,
 		enclaveNamespaceName,
-		apiContainerPodName,
-		apiContainerPodLabels,
-		apiContainerPodAnnotations,
+		apiContainerDeploymentName,
+		apiContainerDeploymentLabels,
+		apiContainerDeploymentAnnotations,
 		apiContainerInitContainers,
 		apiContainerContainers,
 		apiContainerVolumes,
 		apiContainerServiceAccountName,
-		apiContainerRestartPolicy,
 		noTolerations,
 		noSelectors,
+		nil,
 	)
 	if err != nil {
-		errMsg := fmt.Sprintf("An error occurred while creating the pod with name '%s' in namespace '%s' with image '%s'", apiContainerPodName, enclaveNamespaceName, image)
+		errMsg := fmt.Sprintf("An error occurred while creating the deployment with name '%s' in namespace '%s' with image '%s'", apiContainerDeployment, enclaveNamespaceName, image)
 		logrus.Errorf("%s. Error was:\n%s", errMsg, err)
 		return nil, stacktrace.Propagate(err, errMsg)
 	}
 	var shouldRemovePod = true
 	defer func() {
 		if shouldRemovePod {
-			if err := backend.kubernetesManager.RemovePod(ctx, apiContainerPod); err != nil {
-				logrus.Errorf("Creating the api container didn't complete successfully, so we tried to delete Kubernetes pod '%v' that we created but an error was thrown:\n%v", apiContainerPodName, err)
-				logrus.Errorf("ACTION REQUIRED: You'll need to manually remove Kubernetes pod with name '%v'!!!!!!!", apiContainerPodName)
+			if err := backend.kubernetesManager.RemoveDeployment(ctx, apiContainerDeployment); err != nil {
+				logrus.Errorf("Creating the api container didn't complete successfully, so we tried to delete Kubernetes deployment '%v' that we created but an error was thrown:\n%v", apiContainerDeployment, err)
+				logrus.Errorf("ACTION REQUIRED: You'll need to manually remove Kubernetes deployment with name '%v'!!!!!!!", apiContainerDeploymentName)
 			}
 		}
 	}()
+
+	if err := backend.kubernetesManager.WaitForPodManagedByDeployment(ctx, apiContainerDeployment, deploymentMaxRetries, deploymentRetryInterval); err != nil {
+		return nil, stacktrace.Propagate(err, "An error occurred waiting for active pod managed by deployment '%v'", apiContainerDeployment.Name)
+	}
 
 	apiContainerResources := &apiContainerKubernetesResources{
 		role:           apiContainerRole,
 		roleBinding:    apiContainerRoleBinding,
 		serviceAccount: apiContainerServiceAccount,
 		service:        apiContainerService,
-		pod:            apiContainerPod,
+		deployment:     apiContainerDeployment,
 	}
-	apiContainerObjsById, err := getApiContainerObjectsFromKubernetesResources(map[enclave.EnclaveUUID]*apiContainerKubernetesResources{
+	apiContainerObjsById, err := getApiContainerObjectsFromKubernetesResources(ctx, map[enclave.EnclaveUUID]*apiContainerKubernetesResources{
 		enclaveId: apiContainerResources,
-	})
+	}, backend.kubernetesManager)
 	if err != nil {
 		return nil, stacktrace.Propagate(err, "An error occurred converting the new API container's Kubernetes resources to API container objects")
 	}
 	resultApiContainer, found := apiContainerObjsById[enclaveId]
 	if !found {
 		return nil, stacktrace.NewError("Successfully converted the new API container's Kubernetes resources to an API container object, but the resulting map didn't have an entry for enclave ID '%v'", enclaveId)
-	}
-
-	if err := shared_helpers.WaitForPortAvailabilityUsingNetstat(
-		backend.kubernetesManager,
-		enclaveNamespaceName,
-		apiContainerPodName,
-		kurtosisApiContainerContainerName,
-		privateGrpcPortSpec,
-		maxWaitForApiContainerContainerAvailabilityRetries,
-		timeBetweenWaitForApiContainerContainerAvailabilityRetries,
-	); err != nil {
-		return nil, stacktrace.Propagate(err, "An error occurred waiting for the API container grpc port '%v/%v' to become available", privateGrpcPortSpec.GetTransportProtocol(), privateGrpcPortSpec.GetNumber())
 	}
 
 	shouldRemoveClusterRole = false
@@ -582,16 +576,14 @@ func (backend *KubernetesKurtosisBackend) StopAPIContainers(
 	successfulEnclaveIds := map[enclave.EnclaveUUID]bool{}
 	erroredEnclaveIds := map[enclave.EnclaveUUID]error{}
 	for enclaveId, resources := range matchingKubernetesResources {
-		kubernetesPod := resources.pod
-		if kubernetesPod != nil {
-			podName := kubernetesPod.GetName()
-			namespaceName := kubernetesPod.GetNamespace()
-			if err := backend.kubernetesManager.RemovePod(ctx, kubernetesPod); err != nil {
+		kubernetesDeployment := resources.deployment
+		if kubernetesDeployment != nil {
+			if err := backend.kubernetesManager.RemoveDeployment(ctx, kubernetesDeployment); err != nil {
 				erroredEnclaveIds[enclaveId] = stacktrace.Propagate(
 					err,
-					"An error occurred removing pod '%v' in namespace '%v' for API container in enclave with ID '%v'",
-					podName,
-					namespaceName,
+					"An error occurred removing deployment '%v' in namespace '%v' for API container in enclave with ID '%v'",
+					kubernetesDeployment.Name,
+					kubernetesDeployment.Namespace,
 					enclaveId,
 				)
 				continue
@@ -643,13 +635,12 @@ func (backend *KubernetesKurtosisBackend) DestroyAPIContainers(
 	for enclaveId, resources := range matchingResources {
 
 		// Remove Pod
-		if resources.pod != nil {
-			podName := resources.pod.GetName()
-			if err := backend.kubernetesManager.RemovePod(ctx, resources.pod); err != nil {
+		if resources.deployment != nil {
+			if err := backend.kubernetesManager.RemoveDeployment(ctx, resources.deployment); err != nil {
 				erroredEnclaveIds[enclaveId] = stacktrace.Propagate(
 					err,
-					"An error occurred removing pod '%v' for API container in enclave with ID '%v'",
-					podName,
+					"An error occurred removing deployment '%v' for API container in enclave with ID '%v'",
+					resources.deployment.Name,
 					enclaveId,
 				)
 				continue
@@ -736,7 +727,7 @@ func (backend *KubernetesKurtosisBackend) getMatchingApiContainerObjectsAndKuber
 		return nil, nil, stacktrace.Propagate(err, "An error occurred getting API container Kubernetes resources matching enclave UUIDs: %+v", filters.EnclaveIDs)
 	}
 
-	apiContainerObjects, err := getApiContainerObjectsFromKubernetesResources(matchingResources)
+	apiContainerObjects, err := getApiContainerObjectsFromKubernetesResources(ctx, matchingResources, backend.kubernetesManager)
 	if err != nil {
 		return nil, nil, stacktrace.Propagate(err, "An error occurred getting API container objects from Kubernetes resources")
 	}
@@ -845,7 +836,7 @@ func (backend *KubernetesKurtosisBackend) getMatchingApiContainerKubernetesResou
 		service := servicesForEnclaveId[0]
 
 		// Pods
-		pods, err := kubernetes_resource_collectors.CollectMatchingPods(
+		deployments, err := kubernetes_resource_collectors.CollectMatchingDeployments(
 			ctx,
 			backend.kubernetesManager,
 			namespaceName,
@@ -858,26 +849,26 @@ func (backend *KubernetesKurtosisBackend) getMatchingApiContainerKubernetesResou
 		if err != nil {
 			return nil, stacktrace.Propagate(err, "An error occurred getting pods matching enclave ID '%v' in namespace '%v'", enclaveIdStr, namespaceName)
 		}
-		var pod *apiv1.Pod
-		if podsForEnclaveId, found := pods[enclaveIdStr]; found {
-			if len(podsForEnclaveId) == 0 {
+		var deployment *v1.Deployment
+		if deploymentsForEnclaveId, found := deployments[enclaveIdStr]; found {
+			if len(deploymentsForEnclaveId) == 0 {
 				return nil, stacktrace.NewError(
-					"Expected to find one API container pod in namespace '%v' for enclave with ID '%v' "+
+					"Expected to find one API container deployment in namespace '%v' for enclave with ID '%v' "+
 						"but none was found",
 					namespaceName,
 					enclaveIdStr,
 				)
 			}
-			if len(podsForEnclaveId) > 1 {
+			if len(deploymentsForEnclaveId) > 1 {
 				return nil, stacktrace.NewError(
-					"Expected at most one API container pod in namespace '%v' for enclave with ID '%v' "+
+					"Expected at most one API container deployment in namespace '%v' for enclave with ID '%v' "+
 						"but found '%v'",
 					namespaceName,
 					enclaveIdStr,
-					len(pods),
+					len(deploymentsForEnclaveId),
 				)
 			}
-			pod = podsForEnclaveId[0]
+			deployment = deploymentsForEnclaveId[0]
 		}
 
 		//Role Bindings
@@ -992,18 +983,22 @@ func (backend *KubernetesKurtosisBackend) getMatchingApiContainerKubernetesResou
 
 		result[enclaveId] = &apiContainerKubernetesResources{
 			service:        service,
-			pod:            pod,
+			deployment:     deployment,
 			role:           role,
 			roleBinding:    roleBinding,
 			serviceAccount: serviceAccount,
 		}
+
+		fmt.Printf("DEPLOYMENT: %+v", deployment)
 	}
 
 	return result, nil
 }
 
 func getApiContainerObjectsFromKubernetesResources(
+	ctx context.Context,
 	allResources map[enclave.EnclaveUUID]*apiContainerKubernetesResources,
+	kubernetesManager *kubernetes_manager.KubernetesManager,
 ) (
 	map[enclave.EnclaveUUID]*api_container.APIContainer,
 	error,
@@ -1016,9 +1011,18 @@ func getApiContainerObjectsFromKubernetesResources(
 			return nil, stacktrace.NewError("Expected a Kubernetes service for API container in enclave '%v'", enclaveId)
 		}
 
-		status, err := shared_helpers.GetContainerStatusFromPod(resourcesForEnclaveId.pod)
+		pods, err := kubernetesManager.GetPodsManagedByDeployment(ctx, resourcesForEnclaveId.deployment)
 		if err != nil {
-			return nil, stacktrace.Propagate(err, "An error occurred getting container status from Kubernetes pod '%+v'", resourcesForEnclaveId.pod)
+			return nil, stacktrace.Propagate(err, "An error ocurred getting pods managed by deployment %s", resourcesForEnclaveId.deployment.Name)
+		}
+
+		if len(pods) != 1 {
+			return nil, stacktrace.NewError("Expected exactly one pod in the API container deployment %s, but got %d", resourcesForEnclaveId.deployment.Name, len(pods))
+		}
+
+		status, err := shared_helpers.GetContainerStatusFromPod(pods[0])
+		if err != nil {
+			return nil, stacktrace.Propagate(err, "An error occurred getting container status from Kubernetes pod '%+v'", pods[0])
 		}
 
 		privateIpAddr := net.ParseIP(resourcesForEnclaveId.service.Spec.ClusterIP)

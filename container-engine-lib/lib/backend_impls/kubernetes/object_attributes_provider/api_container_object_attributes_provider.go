@@ -23,7 +23,7 @@ const (
 var apiContainerObjectName = kubernetes_object_name.MustCreateNewKubernetesObjectName(apiContainerObjectNameStr)
 
 type KubernetesApiContainerObjectAttributesProvider interface {
-	ForApiContainerPod() (KubernetesObjectAttributes, error)
+	ForApiContainerDeployment() (KubernetesObjectAttributes, error)
 	ForApiContainerService(
 		privateGrpcPortId string,
 		privateGrpcPortSpec *port_spec.PortSpec) (KubernetesObjectAttributes, error)
@@ -49,7 +49,7 @@ func newKubernetesApiContainerObjectAttributesProviderImpl(enclaveId enclave.Enc
 	}
 }
 
-func (provider *kubernetesApiContainerObjectAttributesProviderImpl) ForApiContainerPod() (KubernetesObjectAttributes, error) {
+func (provider *kubernetesApiContainerObjectAttributesProviderImpl) ForApiContainerDeployment() (KubernetesObjectAttributes, error) {
 	labels, err := provider.getLabelsForApiContainerObject()
 	if err != nil {
 		return nil, stacktrace.Propagate(err, "Failed to get labels for API container object in enclave with ID '%v'", provider.enclaveId)

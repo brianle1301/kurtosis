@@ -3,6 +3,8 @@ package grafloki
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/kurtosis-tech/kurtosis/cli/cli/kurtosis_config/resolved_config"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_manager"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/object_attributes_provider/kubernetes_label_key"
@@ -13,7 +15,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
-	"time"
 )
 
 const (
@@ -164,6 +165,9 @@ func createGrafanaAndLokiDeployments(ctx context.Context, k8sManager *kubernetes
 			},
 		},
 		[]apiv1.Volume{},
+		"",
+		nil,
+		nil,
 		&apiv1.Affinity{
 			NodeAffinity:    nil,
 			PodAffinity:     nil,
@@ -174,7 +178,7 @@ func createGrafanaAndLokiDeployments(ctx context.Context, k8sManager *kubernetes
 	}
 	shouldRemoveLokiDeployment := false
 	removeLokiDeploymentFunc := func() {
-		if err := k8sManager.RemoveDeployment(ctx, graflokiNamespace, lokiDeployment); err != nil {
+		if err := k8sManager.RemoveDeployment(ctx, lokiDeployment); err != nil {
 			logrus.Warnf("Attempted to remove Loki deployment after an error occurred but an error occurred removing it.")
 			logrus.Warnf("!! ACTION REQUIRED !! Manually remove Loki deployment with Name: %v", lokiDeployment.Name)
 		}
@@ -379,6 +383,9 @@ func createGrafanaAndLokiDeployments(ctx context.Context, k8sManager *kubernetes
 				Ephemeral:             nil,
 			},
 		}},
+		"",
+		nil,
+		nil,
 		&apiv1.Affinity{
 			NodeAffinity:    nil,
 			PodAffinity:     nil,
@@ -389,7 +396,7 @@ func createGrafanaAndLokiDeployments(ctx context.Context, k8sManager *kubernetes
 	}
 	shouldRemoveGrafanaDeployment := true
 	removeGrafanaDeploymentFunc := func() {
-		if err := k8sManager.RemoveDeployment(ctx, graflokiNamespace, grafanaDeployment); err != nil {
+		if err := k8sManager.RemoveDeployment(ctx, grafanaDeployment); err != nil {
 			logrus.Warnf("Attempted to remove Loki deployment after an error occurred but an error occurred removing it.")
 			logrus.Warnf("!! ACTION REQUIRED !! Manually remove Loki deployment with Name: %v", lokiDeployment.Name)
 		}

@@ -98,7 +98,7 @@ func (logsAggregator *vectorLogsAggregatorResourcesManager) CreateAndStart(
 	}
 	removeDeploymentFunc := func() {
 		removeCtx := context.Background()
-		if err := kubernetesManager.RemoveDeployment(removeCtx, namespace.Name, deployment); err != nil {
+		if err := kubernetesManager.RemoveDeployment(removeCtx, deployment); err != nil {
 			logrus.Errorf(
 				"Launching the logs aggregator deployment with name '%v' didn't complete successfully so we "+
 					"tried to remove the daemon set we started, but doing so exited with an error:\n%v",
@@ -289,6 +289,9 @@ func createLogsAggregatorDeployment(
 		[]apiv1.Container{}, // no need init containers
 		containers,
 		volumes,
+		"",
+		nil,
+		nil,
 		affinity,
 	)
 	if err != nil {

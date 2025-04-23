@@ -1434,8 +1434,8 @@ func (manager *KubernetesManager) UpdateDaemonSetWithNodeSelectors(ctx context.C
 }
 
 // ---------------------------deployments---------------------------------------------------------------------------------------
-func (manager *KubernetesManager) RemoveDeployment(ctx context.Context, namespace string, deployment *v1.Deployment) error {
-	client := manager.kubernetesClientSet.AppsV1().Deployments(namespace)
+func (manager *KubernetesManager) RemoveDeployment(ctx context.Context, deployment *v1.Deployment) error {
+	client := manager.kubernetesClientSet.AppsV1().Deployments(deployment.Namespace)
 
 	if err := client.Delete(ctx, deployment.Name, globalDeleteOptions); err != nil {
 		return stacktrace.Propagate(err, "Failed to delete deployment with name '%s' with delete options '%+v'", deployment.Name, globalDeleteOptions)
@@ -1474,6 +1474,9 @@ func (manager *KubernetesManager) CreateDeployment(
 	initContainers []apiv1.Container,
 	containers []apiv1.Container,
 	volumes []apiv1.Volume,
+	serviceAccountName string,
+	tolerations []apiv1.Toleration,
+	nodeSelector map[string]string,
 	affinity *apiv1.Affinity,
 ) (*v1.Deployment, error) {
 	deploymentClient := manager.kubernetesClientSet.AppsV1().Deployments(namespaceName)
@@ -1523,8 +1526,8 @@ func (manager *KubernetesManager) CreateDeployment(
 				TerminationGracePeriodSeconds: nil,
 				ActiveDeadlineSeconds:         nil,
 				DNSPolicy:                     "",
-				NodeSelector:                  nil,
-				ServiceAccountName:            "",
+				NodeSelector:                  nodeSelector,
+				ServiceAccountName:            serviceAccountName,
 				DeprecatedServiceAccount:      "",
 				AutomountServiceAccountToken:  nil,
 				NodeName:                      "",
@@ -1537,7 +1540,7 @@ func (manager *KubernetesManager) CreateDeployment(
 				Subdomain:                     "",
 				Affinity:                      affinity,
 				SchedulerName:                 "",
-				Tolerations:                   nil,
+				Tolerations:                   tolerations,
 				HostAliases:                   nil,
 				PriorityClassName:             "",
 				Priority:                      nil,
