@@ -33,7 +33,6 @@ const (
 	// in case it needs to be configured by the user down the line
 	k8sApiServerUrl = "https://kubernetes.default.svc:443"
 
-	// TODO: construct fluentbit config via go templating based on inputs
 	fluentBitConfigFileName = "fluent-bit.conf"
 	fluentBitConfigTemplate = `
 [SERVICE]
@@ -41,6 +40,7 @@ const (
     HTTP_Listen       0.0.0.0
     HTTP_PORT         {{ .HTTPPort }}
     Parsers_File      /fluent-bit/etc/parsers.conf
+    Parsers_File      {{ .KurtosisParsersConfigFilepath }}
 
 [INPUT]
     Name              tail
@@ -68,23 +68,23 @@ const (
     Labels            On
     Annotations       Off
     Kube_Tag_Prefix   kurtosis.var.log.containers.
-
+    
 [FILTER]
     Name lua
     Match *
     call flatten_kubernetes_labels
     code function flatten_kubernetes_labels(tag, timestamp, record) record["{{ .LogsEnclaveUUIDLabel }}"] = record["kubernetes"]["labels"]["{{ .LogsEnclaveUUIDLabel }}"] record["{{ .LogsServiceUUIDLabel }}"] = record["kubernetes"]["labels"]["{{ .LogsServiceUUIDLabel }}"] return 1, timestamp, record end
-
+    
 [FILTER]
     Name record_modifier
     Match *
     Remove_key kubernetes
-
+    
 [FILTER]
     Name modify
     Match *
     Rename time timestamp
-
+    
 [FILTER]
     Name              kubernetes
     Match             *
@@ -93,24 +93,31 @@ const (
     Keep_Log          On
     Annotations       Off
     Labels            On
-{{range .Filters}}
-
+    {{range .Filters}}
+    
 [FILTER]
     Name              {{.Name}}
     Match             {{.Match}}
-{{- range .Params}}
+    {{- range .Params}}
     {{.Key}} {{.Value}}
-{{- end}}{{end}}
-
+    {{- end}}{{end}}
+    
 [OUTPUT]
     Name              stdout
     Match             *
     Format            json_lines
-
+    
 [OUTPUT]
     Name              forward
     Match             *
     Host              {{ .LogsAggregatorHost }}
     Port              {{ .LogsAggregatorPortNum }}
+    `
+
+	parsersFileName          = "kurtosis-parsers.conf"
+	parserConfigFileTemplate = `{{- range .Parsers}}[PARSER]
+{{- range $key, $value := . }}
+    {{$key}} {{$value}}
+{{- end }}{{ end }}
 `
 )
