@@ -86,20 +86,21 @@ func (creator *EnclaveCreator) CreateEnclave(
 		}
 	}()
 
-	// only create log collector for backend as
-	shouldDeleteLogsCollector := true
-	// TODO the logs collector has a random private ip address in the enclave network that must be tracked
-	if _, err := creator.kurtosisBackend.CreateLogsCollectorForEnclave(setupCtx, enclaveUuid, defaultHttpLogsCollectorPortNum, defaultTcpLogsCollectorPortNum, logsCollectorFilters); err != nil {
-		return nil, stacktrace.Propagate(err, "An error occurred creating the logs collector with TCP port number '%v' and HTTP port number '%v'", defaultTcpLogsCollectorPortNum, defaultHttpLogsCollectorPortNum)
-	}
-	defer func() {
-		if shouldDeleteLogsCollector {
-			err = creator.kurtosisBackend.DestroyLogsCollectorForEnclave(teardownCtx, enclaveUuid)
-			if err != nil {
-				logrus.Errorf("Couldn't cleanup logs collector for enclave '%v' as the following error was thrown:\n%v", enclaveUuid, err)
-			}
+	/*
+		// only create log collector for backend as
+		shouldDeleteLogsCollector := true
+		// TODO the logs collector has a random private ip address in the enclave network that must be tracked
+		if _, err := creator.kurtosisBackend.CreateLogsCollectorForEnclave(setupCtx, enclaveUuid, defaultHttpLogsCollectorPortNum, defaultTcpLogsCollectorPortNum, logsCollectorFilters); err != nil {
+			return nil, stacktrace.Propagate(err, "An error occurred creating the logs collector with TCP port number '%v' and HTTP port number '%v'", defaultTcpLogsCollectorPortNum, defaultHttpLogsCollectorPortNum)
 		}
-	}()
+		defer func() {
+			if shouldDeleteLogsCollector {
+				err = creator.kurtosisBackend.DestroyLogsCollectorForEnclave(teardownCtx, enclaveUuid)
+				if err != nil {
+					logrus.Errorf("Couldn't cleanup logs collector for enclave '%v' as the following error was thrown:\n%v", enclaveUuid, err)
+				}
+			}
+		}()*/
 
 	apiContainer, err := creator.LaunchApiContainer(setupCtx,
 		apiContainerImageVersionTag,
@@ -181,7 +182,7 @@ func (creator *EnclaveCreator) CreateEnclave(
 
 	// Everything started successfully, so the responsibility of deleting the enclave is now transferred to the caller
 	shouldStopApiContainer = false
-	shouldDeleteLogsCollector = false
+	// shouldDeleteLogsCollector = false
 	shouldDestroyEnclave = false
 	return newEnclaveInfo, nil
 }
