@@ -36,7 +36,7 @@ const (
 	logsOnlyKurtosisPrefix                = "kurtosis_"
 	logsOnlyEnclaveUuidLabelKeyStr        = logsOnlyKurtosisPrefix + "enclave_uuid"
 	logsOnlyServiceUuidKubernetesLabelKey = logsOnlyKurtosisPrefix + "service_uuid"
-	logsOnlyServiceNameKubernetesLabelKey = logsOnlyKurtosisPrefix + "service_logs"
+	logsOnlyServiceNameKubernetesLabelKey = logsOnlyKurtosisPrefix + "service_name"
 
 	engineNodeLabelKeyStr = labelKeyPrefixStr + "engine-node"
 )
