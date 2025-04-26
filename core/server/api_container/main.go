@@ -54,7 +54,7 @@ const (
 	forceColors   = true
 	fullTimestamp = true
 
-	logMethodAlongWithLogLine = true
+	logMethodAlongWithLogLine = false
 	functionPathSeparator     = "."
 	emptyFunctionName         = ""
 
