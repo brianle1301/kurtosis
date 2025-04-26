@@ -363,7 +363,6 @@ func createStartServiceOperation(
 
 		shouldDestroyPersistentVolumesAndClaims := true
 		createVolumesWithClaims := map[string]*kubernetesVolumeWithClaim{}
-		logrus.Infof("Persistent directories: %+v", persistentDirectories)
 		if persistentDirectories != nil {
 			createVolumesWithClaims, err = preparePersistentDirectoriesResources(
 				ctx,
