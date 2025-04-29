@@ -74,7 +74,7 @@ func (provider *kubernetesEnclaveObjectAttributesProviderImpl) ForEnclaveNamespa
 	// TODO: might need to revert this if we have multiple users on the same cluster (what if two people create enclaves with name test?)
 	name, err := getCompositeKubernetesObjectName([]string{
 		namespacePrefix,
-		enclaveName,
+		provider.enclaveId,
 	})
 	if err != nil {
 		return nil, stacktrace.Propagate(err, "An error occurred creating a name object from string '%v'", provider.enclaveId)
