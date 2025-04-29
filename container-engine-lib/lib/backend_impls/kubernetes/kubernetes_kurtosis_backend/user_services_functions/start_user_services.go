@@ -51,7 +51,7 @@ const (
 
 	unlimitedReplacements = -1
 
-	statefulSetMaxRetries    = 60
+	statefulSetMaxRetries    = 120
 	statefulSetRetryInterval = 1 * time.Second
 )
 
