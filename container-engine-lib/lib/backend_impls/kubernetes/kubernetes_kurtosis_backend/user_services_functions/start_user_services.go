@@ -51,8 +51,8 @@ const (
 
 	unlimitedReplacements = -1
 
-	statefulSetMaxRetries    = 150
-	statefulSetRetryInterval = 2 * time.Second
+	statefulSetMaxRetries    = 300
+	statefulSetRetryInterval = 3 * time.Second
 )
 
 // Completeness enforced via unit test
