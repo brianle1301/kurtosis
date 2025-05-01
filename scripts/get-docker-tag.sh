@@ -14,4 +14,4 @@ fi
 
 commit_sha="$(git rev-parse --short=6 HEAD)"
 suffix="$(git diff --quiet || echo '-dirty')"
-echo "latest"
+echo "${commit_sha}${suffix}"

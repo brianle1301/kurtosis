@@ -12,6 +12,15 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"os"
+	"path"
+	"strings"
+	"time"
+	"unicode"
+
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/service_user"
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine"
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/docker_compose_transpiler"
@@ -21,14 +30,6 @@ import (
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/plan_yaml"
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/starlark_run"
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/startosis_packages/git_package_content_provider"
-	"io"
-	"math"
-	"net/http"
-	"os"
-	"path"
-	"strings"
-	"time"
-	"unicode"
 
 	"github.com/kurtosis-tech/kurtosis/metrics-library/golang/lib/metrics_client"
 
@@ -1059,8 +1060,77 @@ func (apicService *ApiContainerService) runStarlark(
 					logrus.Warn("An error occurred tracking the run-finished event")
 				}
 			}
-			// in addition to send the msg to the RPC stream, we also print the lines to the APIC logs at debug level
-			logrus.Debugf("Received response line from Starlark runner: '%v'", responseLine)
+
+			fields := logrus.Fields{}
+
+			if responseLine.GetInfo() != nil {
+				fields["info"] = map[string]any{
+					"message": responseLine.GetInfo().GetInfoMessage(),
+				}
+			}
+
+			if responseLine.GetError() != nil {
+				if responseLine.GetError().GetValidationError() != nil {
+					fields["error"] = map[string]any{
+						"type":    "validation",
+						"message": responseLine.GetError().GetValidationError().GetErrorMessage(),
+					}
+				}
+
+				if responseLine.GetError().GetInterpretationError() != nil {
+					fields["error"] = map[string]any{
+						"type":    "interpretation",
+						"message": responseLine.GetError().GetInterpretationError().GetErrorMessage(),
+					}
+				}
+
+				if responseLine.GetError().GetExecutionError() != nil {
+					fields["error"] = map[string]any{
+						"type":    "execution",
+						"message": responseLine.GetError().GetExecutionError().GetErrorMessage(),
+					}
+				}
+			}
+
+			if responseLine.GetWarning() != nil {
+				fields["warn"] = map[string]any{
+					"message": responseLine.GetWarning().GetWarningMessage(),
+				}
+			}
+
+			if responseLine.GetInstruction() != nil {
+				fields["instruction"] = map[string]any{
+					"name":                  responseLine.GetInstruction().GetInstructionName(),
+					"executableInstruction": responseLine.GetInstruction().GetExecutableInstruction(),
+					"description":           responseLine.GetInstruction().GetDescription(),
+					"skipped":               responseLine.GetInstruction().GetIsSkipped(),
+					"position":              responseLine.GetInstruction().GetPosition(),
+					// TODO: Args maybe?
+				}
+			}
+
+			if responseLine.GetInstructionResult() != nil {
+				fields["instructionOutput"] = map[string]any{
+					"output": responseLine.GetInstructionResult().GetSerializedInstructionResult(),
+				}
+			}
+
+			if responseLine.GetProgressInfo() != nil {
+				fields["progress"] = map[string]any{
+					"totalSteps":  responseLine.GetProgressInfo().GetTotalSteps(),
+					"currentStep": responseLine.GetProgressInfo().GetCurrentStepNumber(),
+				}
+			}
+
+			if responseLine.GetRunFinishedEvent() != nil {
+				fields["finishedEvent"] = map[string]any{
+					"output":       responseLine.GetRunFinishedEvent().GetSerializedOutput(),
+					"isSuccessful": responseLine.GetRunFinishedEvent().GetIsRunSuccessful(),
+				}
+			}
+
+			logrus.WithFields(fields).Info("Received response line")
+
 			if err := stream.SendMsg(responseLine); err != nil {
 				logrus.Errorf("Starlark response line sent through the channel but could not be forwarded to API Container client. Some log lines will not be returned to the user.\nResponse line was: \n%v. Error was: \n%v", responseLine, err.Error())
 			}
