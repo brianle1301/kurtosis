@@ -5,11 +5,12 @@ import (
 )
 
 type Service struct {
-	LogLevel          string
-	HttpServerEnabled string
-	HttpServerHost    string
-	HttpServerPort    uint16
-	StoragePath       string
+	LogLevel                      string
+	HttpServerEnabled             string
+	HttpServerHost                string
+	HttpServerPort                uint16
+	StoragePath                   string
+	KurtosisParsersConfigFilepath string
 }
 
 type Input struct {
@@ -33,33 +34,41 @@ type FluentbitConfig struct {
 	Output  *Output
 }
 
+type ParserConfig struct {
+	Parsers []logs_collector.Parser
+}
+
 func newFluentbitConfigForKurtosisCentralizedLogs(
 	logsAggregatorHost string,
 	logsAggregatorPort uint16,
 	tcpPortNumber uint16,
 	httpPortNumber uint16,
 	logsCollectorFilters []logs_collector.Filter,
-) *FluentbitConfig {
+	logsCollectorParsers []logs_collector.Parser,
+) (*FluentbitConfig, *ParserConfig) {
 	return &FluentbitConfig{
-		Service: &Service{
-			LogLevel:          logLevel,
-			HttpServerEnabled: httpServerEnabledValue,
-			HttpServerHost:    httpServerLocalhost,
-			HttpServerPort:    httpPortNumber,
-			StoragePath:       filesystemBufferStorageDirpath,
-		},
-		Input: &Input{
-			Name:        inputName,
-			Listen:      inputListenIP,
-			Port:        tcpPortNumber,
-			StorageType: inputFilesystemStorageType,
-		},
-		Filters: logsCollectorFilters,
-		Output: &Output{
-			Name:  vectorOutputTypeName,
-			Match: matchAllRegex,
-			Host:  logsAggregatorHost,
-			Port:  logsAggregatorPort,
-		},
-	}
+			Service: &Service{
+				LogLevel:                      logLevel,
+				HttpServerEnabled:             httpServerEnabledValue,
+				HttpServerHost:                httpServerLocalhost,
+				HttpServerPort:                httpPortNumber,
+				StoragePath:                   filesystemBufferStorageDirpath,
+				KurtosisParsersConfigFilepath: parserConfigFilepathInContainer,
+			},
+			Input: &Input{
+				Name:        inputName,
+				Listen:      inputListenIP,
+				Port:        tcpPortNumber,
+				StorageType: inputFilesystemStorageType,
+			},
+			Filters: logsCollectorFilters,
+			Output: &Output{
+				Name:  vectorOutputTypeName,
+				Match: matchAllRegex,
+				Host:  logsAggregatorHost,
+				Port:  logsAggregatorPort,
+			},
+		}, &ParserConfig{
+			Parsers: logsCollectorParsers,
+		}
 }

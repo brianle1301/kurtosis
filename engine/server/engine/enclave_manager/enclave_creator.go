@@ -54,6 +54,7 @@ func (creator *EnclaveCreator) CreateEnclave(
 	kurtosisBackendType args.KurtosisBackendType,
 	shouldAPICRunInDebugMode bool,
 	logsCollectorFilters []logs_collector.Filter,
+	logsCollectorParsers []logs_collector.Parser,
 ) (*types.EnclaveInfo, error) {
 
 	uuid, err := uuid_generator.GenerateUUIDString()
