@@ -47,12 +47,14 @@ import (
 )
 
 const (
-	podWaitForAvailabilityTimeout          = 15 * time.Minute
-	podWaitForAvailabilityTimeBetweenPolls = 500 * time.Millisecond
-	podWaitForDeletionTimeout              = 5 * time.Minute
-	podWaitForDeletionTimeBetweenPolls     = 500 * time.Millisecond
-	podWaitForTerminationTimeout           = 5 * time.Minute
-	podWaitForTerminationTimeBetweenPolls  = 500 * time.Millisecond
+	podWaitForAvailabilityTimeout              = 15 * time.Minute
+	podWaitForAvailabilityTimeBetweenPolls     = 500 * time.Millisecond
+	podWaitForDeletionTimeout                  = 5 * time.Minute
+	podWaitForDeletionTimeBetweenPolls         = 500 * time.Millisecond
+	podWaitForTerminationTimeout               = 5 * time.Minute
+	podWaitForTerminationTimeBetweenPolls      = 500 * time.Millisecond
+	statefulSetWaitForDeletionTimeout          = 5 * time.Minute
+	statefulSetWaitForDeletionTimeBetweenPolls = 1 * time.Second
 
 	// This is a container "reason" (machine-readable string) indicating that the container has some issue with
 	// pulling the image (usually, a typo in the image name or the image doesn't exist)
@@ -1823,20 +1825,27 @@ func (manager *KubernetesManager) RemoveStatefulSet(ctx context.Context, statefu
 		return stacktrace.Propagate(err, "Failed to delete stateful set with name '%s' with delete options '%+v'", statefulSet.Name, globalDeleteOptions)
 	}
 
-	// TODO: maybe add a termination wait here?
+	err := wait.PollUntilContextTimeout(ctx, statefulSetWaitForDeletionTimeBetweenPolls, statefulSetWaitForDeletionTimeout, true, func(ctx context.Context) (bool, error) {
+		_, err := client.Get(ctx, statefulSet.Name, globalGetOptions)
+
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+
+		return false, err
+	})
+
+	if err != nil {
+		return stacktrace.Propagate(err, "An error occurred waiting for stateful set %s to be fully deleted", statefulSet.Name)
+	}
+
 	return nil
 }
 
 func (manager *KubernetesManager) GetStatefulSet(ctx context.Context, namespace string, name string) (*v1.StatefulSet, error) {
 	client := manager.kubernetesClientSet.AppsV1().StatefulSets(namespace)
 
-	statefulSet, err := client.Get(ctx, name, metav1.GetOptions{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "",
-			APIVersion: "",
-		},
-		ResourceVersion: "",
-	})
+	statefulSet, err := client.Get(ctx, name, globalGetOptions)
 	if apierrors.IsNotFound(err) {
 		return nil, nil // in the case the deployment doesn't exist, simply return a nil object
 	}
