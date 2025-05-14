@@ -66,6 +66,9 @@ func (async *asyncStarlarkLogs) AttachStream(stream grpc.ClientStream) {
 			logrus.Debugf("Resources have been closed before consuming all the upstream data")
 			return
 		case async.starlarkRunResponseLineChan <- responseLine:
+		default:
+			// quick fix: starlarkRunResponseLineChan is likely full, drop the message to keep calling RecvMsg
+			logrus.Warn("log buffer full; dropping Starlark response line")
 		}
 	}
 }
