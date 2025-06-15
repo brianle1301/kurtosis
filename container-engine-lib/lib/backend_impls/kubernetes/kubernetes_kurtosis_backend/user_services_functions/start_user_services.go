@@ -450,7 +450,7 @@ func createStartServiceOperation(
 		}
 
 		if err != nil {
-			return nil, stacktrace.Propagate(err, "An error occurred creating %s '%v' using image '%v'", workload.ReadableType(), workload.Name(), containerImageName)
+			return nil, err
 		}
 
 		shouldDestroyWorkload := true
