@@ -393,10 +393,12 @@ func createStartServiceOperation(
 			return nil, stacktrace.Propagate(err, "An error occurred getting attributes for new workload for service with UUID '%v'", serviceUuid)
 		}
 
-		userServiceContainerVolumeMounts = append(userServiceContainerVolumeMounts, apiv1.VolumeMount{
-			Name:      "data",
-			MountPath: "/data",
-		})
+		if workloadType == service.WorkloadTypeStatefulSet {
+			userServiceContainerVolumeMounts = append(userServiceContainerVolumeMounts, apiv1.VolumeMount{
+				Name:      "data",
+				MountPath: "/data",
+			})
+		}
 
 		podContainers, err := getUserServicePodContainerSpecs(
 			containerImageName,
