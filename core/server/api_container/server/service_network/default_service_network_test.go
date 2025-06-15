@@ -8,13 +8,14 @@ package service_network
 import (
 	"context"
 	"fmt"
-	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_download_mode"
 	"net"
 	"net/netip"
 	"os"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_download_mode"
 
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/database_accessors/enclave_db"
 
@@ -1205,7 +1206,7 @@ func openFreeTCPAndUDPLocalHostPortAddressesForTesting() (*netip.AddrPort, *neti
 }
 
 func testServiceConfig(t *testing.T, imageName string) *service.ServiceConfig {
-	serviceConfig, err := service.CreateServiceConfig(imageName, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, 0, 0, "", 0, 0, map[string]string{}, nil, nil, map[string]string{}, image_download_mode.ImageDownloadMode_Missing, true)
+	serviceConfig, err := service.CreateServiceConfig(imageName, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, 0, 0, "", 0, 0, map[string]string{}, nil, nil, map[string]string{}, image_download_mode.ImageDownloadMode_Missing, true, service.WorkloadTypeStatefulSet)
 	require.NoError(t, err)
 	return serviceConfig
 }

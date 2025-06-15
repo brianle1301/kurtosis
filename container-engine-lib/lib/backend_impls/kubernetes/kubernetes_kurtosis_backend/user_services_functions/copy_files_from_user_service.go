@@ -45,18 +45,11 @@ func CopyFilesFromUserService(
 		return stacktrace.Propagate(err, "An error occurred getting user service object & Kubernetes resources for service '%v' in enclave '%v'", serviceUuid, enclaveId)
 	}
 
-	statefulSet := objectAndResources.KubernetesResources.StatefulSet
-
-	pods, err := kubernetesManager.GetPodsManagedByStatefulSet(ctx, statefulSet)
+	workload := objectAndResources.KubernetesResources.Workload
+	pod, err := workload.GetPod(ctx, kubernetesManager)
 	if err != nil {
-		return stacktrace.Propagate(err, "An error occurred getting pods managed by stateful set '%+v'", statefulSet)
+		return stacktrace.Propagate(err, "An error occurred getting pods managed by %s '%s'", workload.ReadableType(), workload.Name())
 	}
-
-	if len(pods) != 1 {
-		return stacktrace.NewError("Found %d pods managed by stateful set %s when there should only be 1. This is likely a Kurtosis bug!", len(pods), statefulSet.Name)
-	}
-
-	pod := pods[0]
 
 	if pod == nil {
 		return stacktrace.NewError(

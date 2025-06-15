@@ -17,6 +17,7 @@ import (
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_kurtosis_backend/consts"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_manager"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_resource_collectors"
+	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/object_attributes_provider"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/object_attributes_provider/kubernetes_annotation_key"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/object_attributes_provider/kubernetes_annotation_key_consts"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/object_attributes_provider/kubernetes_annotation_value"
@@ -30,7 +31,10 @@ import (
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/service"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/concurrent_writer"
 	"github.com/kurtosis-tech/stacktrace"
-	v1 "k8s.io/api/apps/v1"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/sirupsen/logrus"
 	apiv1 "k8s.io/api/core/v1"
@@ -135,14 +139,208 @@ type UserServiceObjectsAndKubernetesResources struct {
 	KubernetesResources *UserServiceKubernetesResources
 }
 
+type ServiceWorkload interface {
+	Name() string
+	ReadableType() string
+	GetPod(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager) (*apiv1.Pod, error)
+	Delete(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager) error
+}
+
+func CreateJob(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager,
+	attrs object_attributes_provider.KubernetesObjectAttributes, namespace string, initContainers []apiv1.Container,
+	containers []apiv1.Container, volumes []apiv1.Volume, serviceAccountName string, tolerations []apiv1.Toleration,
+	nodeSelector map[string]string, affinity *apiv1.Affinity) (*JobWorkload, error) {
+
+	name := attrs.GetName().GetString()
+	created, err := kubernetesManager.CreateJob(
+		ctx,
+		namespace,
+		name,
+		GetStringMapFromLabelMap(attrs.GetLabels()),
+		GetStringMapFromAnnotationMap(attrs.GetAnnotations()),
+		initContainers,
+		containers,
+		volumes,
+		0,
+		nil,
+		serviceAccountName,
+		tolerations,
+		nodeSelector,
+		affinity,
+	)
+	if err != nil {
+		return nil, stacktrace.Propagate(err, "An error occurred creating job '%v'", name)
+	}
+
+	return NewJobWorkload(created), nil
+}
+
+var _ ServiceWorkload = &JobWorkload{}
+
+type JobWorkload struct {
+	job *batchv1.Job
+}
+
+func NewJobWorkload(job *batchv1.Job) *JobWorkload {
+	return &JobWorkload{
+		job: job,
+	}
+}
+
+func (w *JobWorkload) Name() string {
+	return w.job.Name
+}
+
+func (w *JobWorkload) ReadableType() string {
+	return "job"
+}
+
+func (w *JobWorkload) GetPod(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager) (*apiv1.Pod, error) {
+	pods, err := kubernetesManager.GetPodsManagedByJob(ctx, w.job)
+	if err != nil {
+		return nil, err
+	}
+
+	return pods[0], nil
+}
+
+func (w *JobWorkload) WaitForCompletion(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager, pollInterval time.Duration, pollTimeout time.Duration) error {
+	if err := kubernetesManager.WaitForJobCompletion(ctx, w.job, pollInterval, pollTimeout); err != nil {
+		return stacktrace.Propagate(err, "An error occurred waiting for the job to be completed")
+	}
+
+	return nil
+}
+
+func (w *JobWorkload) Delete(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager) error {
+	return kubernetesManager.RemoveJob(ctx, w.job)
+}
+
+const (
+	workloadMaxRetries    = 120
+	workloadRetryInterval = 2 * time.Second
+)
+
+func CreateStatefulSet(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager,
+	attrs object_attributes_provider.KubernetesObjectAttributes, namespace string, initContainers []apiv1.Container,
+	containers []apiv1.Container, volumes []apiv1.Volume, serviceAccountName string, tolerations []apiv1.Toleration,
+	nodeSelector map[string]string, affinity *apiv1.Affinity) (*StatefulSetWorkload, error) {
+
+	volumeModeFs := apiv1.PersistentVolumeFilesystem
+
+	name := attrs.GetName().GetString()
+	created, err := kubernetesManager.CreateStatefulSet(
+		ctx,
+		namespace,
+		name,
+		GetStringMapFromLabelMap(attrs.GetLabels()),
+		GetStringMapFromAnnotationMap(attrs.GetAnnotations()),
+		[]apiv1.PersistentVolumeClaim{
+			{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: "",
+					Kind:       "",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "data",
+					Annotations: map[string]string{
+						"resize.topolvm.io/threshold":        "40%",
+						"resize.topolvm.io/inodes-threshold": "15%",
+						"resize.topolvm.io/increase":         "100%",
+						"resize.topolvm.io/storage_limit":    "2000Gi",
+					},
+				},
+				Spec: apiv1.PersistentVolumeClaimSpec{
+					AccessModes:      []apiv1.PersistentVolumeAccessMode{apiv1.ReadWriteOnce},
+					VolumeMode:       &volumeModeFs,
+					StorageClassName: &kubernetesManager.StorageClass,
+					Resources: apiv1.ResourceRequirements{
+						Requests: apiv1.ResourceList{
+							apiv1.ResourceStorage: resource.MustParse("10Gi"),
+						},
+					},
+				},
+			},
+		},
+		&appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+			WhenDeleted: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+			WhenScaled:  appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
+		},
+		initContainers,
+		containers,
+		volumes,
+		serviceAccountName,
+		tolerations,
+		nodeSelector,
+		affinity,
+	)
+	if err != nil {
+		return nil, stacktrace.Propagate(err, "An error occurred creating stateful set '%v'", name)
+	}
+
+	workload := NewStatefulSetWorkload(created)
+
+	successful := false
+	defer func() {
+		if successful {
+			return
+		}
+
+		if err := workload.Delete(ctx, kubernetesManager); err != nil {
+			logrus.Errorf("Starting service didn't complete successfully so we tried to remove the stateful set we created but doing so threw an error:\n%v", err)
+			logrus.Errorf("ACTION REQUIRED: You'll need to remove stateful set '%v' in '%v' manually!!!", workload.Name(), namespace)
+		}
+	}()
+
+	if err := kubernetesManager.WaitForPodManagedByStatefulSet(ctx, created, workloadMaxRetries, workloadRetryInterval); err != nil {
+		return nil, stacktrace.Propagate(err, "An error occurred waiting for active pod managed by stateful set '%s'", name)
+	}
+
+	successful = true
+
+	return workload, nil
+}
+
+var _ ServiceWorkload = &StatefulSetWorkload{}
+
+type StatefulSetWorkload struct {
+	statefulSet *appsv1.StatefulSet
+}
+
+func NewStatefulSetWorkload(statefulSet *appsv1.StatefulSet) *StatefulSetWorkload {
+	return &StatefulSetWorkload{
+		statefulSet: statefulSet,
+	}
+}
+
+func (w *StatefulSetWorkload) Name() string {
+	return w.statefulSet.Name
+}
+
+func (w *StatefulSetWorkload) ReadableType() string {
+	return "stateful set"
+}
+
+func (w *StatefulSetWorkload) GetPod(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager) (*apiv1.Pod, error) {
+	pods, err := kubernetesManager.GetPodsManagedByStatefulSet(ctx, w.statefulSet)
+	if err != nil {
+		return nil, err
+	}
+
+	return pods[0], nil
+}
+
+func (w *StatefulSetWorkload) Delete(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager) error {
+	return kubernetesManager.RemoveStatefulSet(ctx, w.statefulSet)
+}
+
 // Any of these fields can be nil if they don't exist in Kubernetes, though at least
 // one field will be present (else this struct won't exist)
 type UserServiceKubernetesResources struct {
 	// This can be nil if the user manually deleted the Kubernetes service (e.g. using the Kubernetes dashboard)
 	Service *apiv1.Service
 
-	// This can be nil if the user hasn't started a pod for the service yet, or if the pod was deleted
-	StatefulSet *v1.StatefulSet
+	Workload ServiceWorkload
 
 	// This can be nil if the user hasn't started the service yet, or if the ingress was deleted
 	Ingress *netv1.Ingress
@@ -327,9 +525,9 @@ func GetUserServiceKubernetesResourcesMatchingGuids(
 		resultObj, found := results[serviceUuid]
 		if !found {
 			resultObj = &UserServiceKubernetesResources{
-				Service:     nil,
-				StatefulSet: nil,
-				Ingress:     nil,
+				Service:  nil,
+				Workload: nil,
+				Ingress:  nil,
 			}
 		}
 		resultObj.Service = kubernetesService
@@ -366,12 +564,51 @@ func GetUserServiceKubernetesResourcesMatchingGuids(
 			resultObj, found := results[serviceUuid]
 			if !found {
 				resultObj = &UserServiceKubernetesResources{
-					Service:     nil,
-					StatefulSet: nil,
-					Ingress:     nil,
+					Service:  nil,
+					Workload: nil,
+					Ingress:  nil,
 				}
 			}
-			resultObj.StatefulSet = statefulSet
+			resultObj.Workload = NewStatefulSetWorkload(statefulSet)
+			results[serviceUuid] = resultObj
+		}
+	}
+
+	matchingKubernetesJobs, err := kubernetes_resource_collectors.CollectMatchingJobs(
+		ctx,
+		kubernetesManager,
+		namespaceName,
+		kubernetesResourceSearchLabels,
+		kubernetes_label_key.GUIDKubernetesLabelKey.GetString(),
+		postFilterLabelValues,
+	)
+	if err != nil {
+		return nil, stacktrace.Propagate(err, "An error occurred getting Kubernetes pods matching service UUIDs: %+v", serviceUuids)
+	}
+	for serviceGuidStr, kubernetesJobsForGuid := range matchingKubernetesJobs {
+		logrus.Tracef("Found Kubernetes stateful sets for GUID '%v': %+v", serviceGuidStr, kubernetesJobsForGuid)
+		serviceUuid := service.ServiceUUID(serviceGuidStr)
+
+		numJobsForGuid := len(kubernetesJobsForGuid)
+		if numJobsForGuid > 1 {
+			return nil, stacktrace.NewError("Found %v Kubernetes jobs associated with service GUID '%v'; this is a bug in Kurtosis", numJobsForGuid, serviceUuid)
+		} else if numJobsForGuid == 1 {
+			job := kubernetesJobsForGuid[0]
+
+			numContainersForJob := len(job.Spec.Template.Spec.Containers)
+			if numContainersForJob != 1 {
+				return nil, stacktrace.NewError("Found %v containers associated with service GUID '%v'; this is a bug in Kurtosis", numContainersForJob, serviceUuid)
+			}
+
+			resultObj, found := results[serviceUuid]
+			if !found {
+				resultObj = &UserServiceKubernetesResources{
+					Service:  nil,
+					Workload: nil,
+					Ingress:  nil,
+				}
+			}
+			resultObj.Workload = NewJobWorkload(job)
 			results[serviceUuid] = resultObj
 		}
 	}
@@ -401,9 +638,9 @@ func GetUserServiceKubernetesResourcesMatchingGuids(
 		resultObj, found := results[serviceUuid]
 		if !found {
 			resultObj = &UserServiceKubernetesResources{
-				Service:     nil,
-				StatefulSet: nil,
-				Ingress:     nil,
+				Service:  nil,
+				Workload: nil,
+				Ingress:  nil,
 			}
 		}
 		resultObj.Ingress = kubernetesIngress
@@ -431,7 +668,7 @@ func GetUserServiceObjectsFromKubernetesResources(
 	for serviceUuid, resultObj := range results {
 		resourcesToParse := resultObj.KubernetesResources
 		kubernetesService := resourcesToParse.Service
-		kubernetesStatefulSets := resourcesToParse.StatefulSet
+		kubernetesWorkload := resourcesToParse.Workload
 
 		if kubernetesService == nil {
 			return nil, stacktrace.NewError(
@@ -479,7 +716,7 @@ func GetUserServiceObjectsFromKubernetesResources(
 			return nil, stacktrace.Propagate(err, "An error occurred deserializing private ports from the user service's Kubernetes service")
 		}
 
-		if kubernetesStatefulSets == nil {
+		if kubernetesWorkload == nil {
 			// No pod here means that a) a Service had private ports but b) now has no Pod
 			// This means that there  used to be a Pod but it was stopped/removed
 			resultObj.Service = service.NewService(
@@ -497,21 +734,17 @@ func GetUserServiceObjectsFromKubernetesResources(
 			continue
 		}
 
-		pods, err := kubernetesManager.GetPodsManagedByStatefulSet(ctx, resourcesToParse.StatefulSet)
+		pod, err := kubernetesWorkload.GetPod(ctx, kubernetesManager)
 		if err != nil {
-			return nil, stacktrace.Propagate(err, "An error occurred getting pods managed by stateful set '%+v'", resourcesToParse.StatefulSet)
+			return nil, stacktrace.Propagate(err, "An error occurred getting pods managed by %s '%s'", kubernetesWorkload.ReadableType(), kubernetesWorkload.Name())
 		}
 
-		if len(pods) != 1 {
-			return nil, stacktrace.NewError("Found %d pods managed by stateful set %s when there should only be 1. This is likely a Kurtosis bug!", len(pods), resourcesToParse.StatefulSet.Name)
-		}
-
-		containerStatus, err := GetContainerStatusFromPod(pods[0])
+		containerStatus, err := GetContainerStatusFromPod(pod)
 		if err != nil {
-			return nil, stacktrace.Propagate(err, "An error occurred getting container status from Kubernetes pod '%+v'", pods[0])
+			return nil, stacktrace.Propagate(err, "An error occurred getting container status from Kubernetes pod '%+v'", pod)
 		}
 
-		podContainer := resourcesToParse.StatefulSet.Spec.Template.Spec.Containers[0]
+		podContainer := pod.Spec.Containers[0]
 		podContainerEnvVars := map[string]string{}
 		for _, env := range podContainer.Env {
 			podContainerEnvVars[env.Name] = env.Value

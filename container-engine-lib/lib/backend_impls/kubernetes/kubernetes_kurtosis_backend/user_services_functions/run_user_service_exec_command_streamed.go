@@ -63,18 +63,11 @@ func RunUserServiceExecCommandWithStreamedOutput(
 			userServiceKubernetesService.GetContainer().GetStatus().String())
 	}
 
-	userServiceKubernetesStatefulSet := userServiceKubernetesResource.KubernetesResources.StatefulSet
-
-	pods, err := kubernetesManager.GetPodsManagedByStatefulSet(ctx, userServiceKubernetesStatefulSet)
+	workload := userServiceKubernetesResource.KubernetesResources.Workload
+	pod, err := workload.GetPod(ctx, kubernetesManager)
 	if err != nil {
-		return nil, nil, stacktrace.Propagate(err, "An error occurred getting pods managed by stateful set '%+v'", userServiceKubernetesStatefulSet)
+		return nil, nil, stacktrace.Propagate(err, "An error occurred getting pods managed by %s '%s'", workload.ReadableType(), workload.Name())
 	}
-
-	if len(pods) != 1 {
-		return nil, nil, stacktrace.NewError("Found %d pods managed by stateful set %s when there should only be 1. This is likely a Kurtosis bug!", len(pods), userServiceKubernetesStatefulSet.Name)
-	}
-
-	pod := pods[0]
 
 	execOutputLinesChan, finalResultChan, err := kubernetesManager.RunExecCommandWithStreamedOutput(
 		ctx,

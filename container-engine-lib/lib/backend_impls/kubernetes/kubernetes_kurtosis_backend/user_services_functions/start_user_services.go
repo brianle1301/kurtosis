@@ -4,10 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
-
-	v1 "k8s.io/api/apps/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_download_mode"
 
@@ -51,9 +47,6 @@ const (
 	unboundPortNumber = 1
 
 	unlimitedReplacements = -1
-
-	statefulSetMaxRetries    = 120
-	statefulSetRetryInterval = 2 * time.Second
 )
 
 // Completeness enforced via unit test
@@ -321,6 +314,7 @@ func createStartServiceOperation(
 		tolerations := serviceConfig.GetTolerations()
 		nodeSelectors := serviceConfig.GetNodeSelectors()
 		imageDownloadMode := serviceConfig.GetImageDownloadMode()
+		workloadType := serviceConfig.GetWorkloadType()
 
 		matchingObjectAndResources, found := servicesObjectsAndResources[serviceUuid]
 		if !found {
@@ -392,13 +386,12 @@ func createStartServiceOperation(
 			}
 		}()
 
-		// Create the stateful set
-		statefulSetAttrs, err := enclaveObjAttributesProvider.ForUserServiceStatefulSet(serviceUuid, serviceName, privatePorts, serviceConfig.GetLabels())
+		// Create the workload
+
+		workloadAttrs, err := enclaveObjAttributesProvider.ForUserServiceWorkload(serviceUuid, serviceName, privatePorts, serviceConfig.GetLabels())
 		if err != nil {
-			return nil, stacktrace.Propagate(err, "An error occurred getting attributes for new stateful set for service with UUID '%v'", serviceUuid)
+			return nil, stacktrace.Propagate(err, "An error occurred getting attributes for new workload for service with UUID '%v'", serviceUuid)
 		}
-		statefulSetLabelsStrs := shared_helpers.GetStringMapFromLabelMap(statefulSetAttrs.GetLabels())
-		statefulSetAnnotationsStrs := shared_helpers.GetStringMapFromAnnotationMap(statefulSetAttrs.GetAnnotations())
 
 		userServiceContainerVolumeMounts = append(userServiceContainerVolumeMounts, apiv1.VolumeMount{
 			Name:      "data",
@@ -422,75 +415,54 @@ func createStartServiceOperation(
 			return nil, stacktrace.Propagate(err, "An error occurred creating the container specs for the user service pod with image '%v'", containerImageName)
 		}
 
-		volumeModeFs := apiv1.PersistentVolumeFilesystem
-		storageClassName := "auto-gp3"
+		var workload shared_helpers.ServiceWorkload
 
-		claimTemplates := []apiv1.PersistentVolumeClaim{
-			{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "",
-					Kind:       "",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "data",
-					Annotations: map[string]string{
-						"resize.topolvm.io/threshold":        "40%",
-						"resize.topolvm.io/inodes-threshold": "15%",
-						"resize.topolvm.io/increase":         "100%",
-						"resize.topolvm.io/storage_limit":    "2000Gi",
-					},
-				},
-				Spec: apiv1.PersistentVolumeClaimSpec{
-					AccessModes:      []apiv1.PersistentVolumeAccessMode{apiv1.ReadWriteOnce},
-					VolumeMode:       &volumeModeFs,
-					StorageClassName: &storageClassName,
-					Resources: apiv1.ResourceRequirements{
-						Requests: apiv1.ResourceList{
-							apiv1.ResourceStorage: resource.MustParse("10Gi"),
-						},
-					},
-				},
-			},
+		if workloadType == service.WorkloadTypeStatefulSet {
+			workload, err = shared_helpers.CreateStatefulSet(
+				ctx,
+				kubernetesManager,
+				workloadAttrs,
+				namespaceName,
+				podInitContainers,
+				podContainers,
+				podVolumes,
+				userServiceServiceAccountName,
+				tolerations,
+				nodeSelectors,
+				nil,
+			)
+		} else if workloadType == service.WorkloadTypeJob {
+			workload, err = shared_helpers.CreateJob(
+				ctx,
+				kubernetesManager,
+				workloadAttrs,
+				namespaceName,
+				podInitContainers,
+				podContainers,
+				podVolumes,
+				userServiceServiceAccountName,
+				tolerations,
+				nodeSelectors,
+				nil,
+			)
+		} else {
+			panic("Invalid workload type")
 		}
 
-		statefulSetName := statefulSetAttrs.GetName().GetString()
-		createdStatefulSet, err := kubernetesManager.CreateStatefulSet(
-			ctx,
-			namespaceName,
-			statefulSetName,
-			statefulSetLabelsStrs,
-			statefulSetAnnotationsStrs,
-			claimTemplates,
-			&v1.StatefulSetPersistentVolumeClaimRetentionPolicy{
-				WhenDeleted: v1.DeletePersistentVolumeClaimRetentionPolicyType,
-				WhenScaled:  v1.RetainPersistentVolumeClaimRetentionPolicyType,
-			},
-			podInitContainers,
-			podContainers,
-			podVolumes,
-			userServiceServiceAccountName,
-			tolerations,
-			nodeSelectors,
-			nil,
-		)
 		if err != nil {
-			return nil, stacktrace.Propagate(err, "An error occurred creating stateful set '%v' using image '%v'", statefulSetName, containerImageName)
+			return nil, stacktrace.Propagate(err, "An error occurred creating %s '%v' using image '%v'", workload.ReadableType(), workload.Name(), containerImageName)
 		}
 
-		shouldDestroyStatefulSet := true
+		shouldDestroyWorkload := true
 		defer func() {
-			if !shouldDestroyStatefulSet {
+			if !shouldDestroyWorkload {
 				return
 			}
-			if err := kubernetesManager.RemoveStatefulSet(ctx, createdStatefulSet); err != nil {
-				logrus.Errorf("Starting service didn't complete successfully so we tried to remove the stateful set we created but doing so threw an error:\n%v", err)
-				logrus.Errorf("ACTION REQUIRED: You'll need to remove stateful set '%v' in '%v' manually!!!", createdStatefulSet, namespaceName)
+			if err := workload.Delete(ctx, kubernetesManager); err != nil {
+				logrus.Errorf("Starting service didn't complete successfully so we tried to remove the %s we created but doing so threw an error:\n%v", workload.ReadableType(), err)
+				logrus.Errorf("ACTION REQUIRED: You'll need to remove %s '%v' in '%v' manually!!!", workload.ReadableType(), workload.Name(), namespaceName)
 			}
 		}()
-
-		if err := kubernetesManager.WaitForPodManagedByStatefulSet(ctx, createdStatefulSet, statefulSetMaxRetries, statefulSetRetryInterval); err != nil {
-			return nil, stacktrace.Propagate(err, "An error occurred waiting for active pod managed by stateful set '%v'", createdStatefulSet.Name)
-		}
 
 		// Create the ingress for the reverse proxy
 		ingressAttributes, err := enclaveObjAttributesProvider.ForUserServiceIngress(serviceUuid, serviceName, privatePorts)
@@ -544,25 +516,25 @@ func createStartServiceOperation(
 
 		kubernetesResources := map[service.ServiceUUID]*shared_helpers.UserServiceKubernetesResources{
 			serviceUuid: {
-				Service:     updatedService,
-				StatefulSet: createdStatefulSet,
+				Service:  updatedService,
+				Workload: workload,
 			},
 		}
 
 		convertedObjects, err := shared_helpers.GetUserServiceObjectsFromKubernetesResources(ctx, enclaveUuid, kubernetesResources, kubernetesManager)
 		if err != nil {
-			return nil, stacktrace.Propagate(err, "An error occurred getting a service object from the Kubernetes service and newly-created stateful set")
+			return nil, stacktrace.Propagate(err, "An error occurred getting a service object from the Kubernetes service and newly-created workload")
 		}
 		objectsAndResources, found := convertedObjects[serviceUuid]
 		if !found {
 			return nil, stacktrace.NewError(
-				"Successfully converted the Kubernetes service + stateful set representing a running service with UUID '%v' to a "+
+				"Successfully converted the Kubernetes service + workload representing a running service with UUID '%v' to a "+
 					"Kurtosis object, but couldn't find that key in the resulting map; this is a bug in Kurtosis",
 				serviceUuid,
 			)
 		}
 
-		shouldDestroyStatefulSet = false
+		shouldDestroyWorkload = false
 		shouldDestroyIngress = false
 		shouldUndoServiceUpdate = false
 		shouldDestroyPersistentVolumesAndClaims = false
@@ -970,8 +942,8 @@ func createRegisterUserServiceOperation(
 
 		kubernetesResources := map[service.ServiceUUID]*shared_helpers.UserServiceKubernetesResources{
 			serviceUuid: {
-				Service:     createdService,
-				StatefulSet: nil, // No stateful set yet
+				Service:  createdService,
+				Workload: nil, // No workload yet
 			},
 		}
 

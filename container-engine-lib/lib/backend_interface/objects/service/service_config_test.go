@@ -68,7 +68,7 @@ func getServiceConfigForTest(t *testing.T, imageName string) *ServiceConfig {
 	serviceConfig, err := CreateServiceConfig(imageName, testImageBuildSpec(), testImageRegistrySpec(), testNixBuildSpec(), testPrivatePorts(t), testPublicPorts(t), []string{"bin", "bash", "ls"}, []string{"-l", "-a"}, testEnvVars(), testFilesArtifactExpansion(), testPersistentDirectory(), 500, 1024, "IP-ADDRESS", 100, 512, map[string]string{
 		"test-label-key":        "test-label-value",
 		"test-second-label-key": "test-second-label-value",
-	}, testServiceUser(), testToleration(), testNodeSelectors(), testImageDownloadMode(), true)
+	}, testServiceUser(), testToleration(), testNodeSelectors(), testImageDownloadMode(), true, WorkloadTypeStatefulSet)
 	require.NoError(t, err)
 	return serviceConfig
 }

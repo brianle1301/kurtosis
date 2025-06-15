@@ -35,18 +35,11 @@ func GetUserServiceLogs(
 	for _, serviceObjectAndResource := range serviceObjectsAndResources {
 		serviceUuid := serviceObjectAndResource.Service.GetRegistration().GetUUID()
 
-		statefulSet := serviceObjectAndResource.KubernetesResources.StatefulSet
-
-		pods, err := kubernetesManager.GetPodsManagedByStatefulSet(ctx, statefulSet)
+		workload := serviceObjectAndResource.KubernetesResources.Workload
+		pod, err := workload.GetPod(ctx, kubernetesManager)
 		if err != nil {
-			return nil, nil, stacktrace.Propagate(err, "An error occurred getting pods managed by stateful set '%+v'", statefulSet)
+			return nil, nil, stacktrace.Propagate(err, "An error occurred getting pods managed by %s '%s'", workload.ReadableType(), workload.Name())
 		}
-
-		if len(pods) != 1 {
-			return nil, nil, stacktrace.NewError("Found %d pods managed by stateful set %s when there should only be 1. This is likely a Kurtosis bug!", len(pods), statefulSet.Name)
-		}
-
-		pod := pods[0]
 
 		serviceNamespaceName := serviceObjectAndResource.KubernetesResources.Service.GetNamespace()
 		// Get logs

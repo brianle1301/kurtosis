@@ -36,7 +36,7 @@ type KubernetesEnclaveObjectAttributesProvider interface {
 		uuid service.ServiceUUID,
 		id service.ServiceName,
 	) (KubernetesObjectAttributes, error)
-	ForUserServiceStatefulSet(
+	ForUserServiceWorkload(
 		uuid service.ServiceUUID,
 		id service.ServiceName,
 		privatePorts map[string]*port_spec.PortSpec,
@@ -155,7 +155,7 @@ func (provider *kubernetesEnclaveObjectAttributesProviderImpl) ForUserServiceSer
 	return objectAttributes, nil
 }
 
-func (provider *kubernetesEnclaveObjectAttributesProviderImpl) ForUserServiceStatefulSet(
+func (provider *kubernetesEnclaveObjectAttributesProviderImpl) ForUserServiceWorkload(
 	serviceUUID service.ServiceUUID,
 	serviceName service.ServiceName,
 	privatePorts map[string]*port_spec.PortSpec,

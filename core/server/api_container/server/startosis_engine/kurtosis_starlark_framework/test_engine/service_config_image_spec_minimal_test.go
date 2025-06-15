@@ -2,9 +2,10 @@ package test_engine
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_download_mode"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_registry_spec"
-	"testing"
 
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/port_spec"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/service"
@@ -54,7 +55,7 @@ func (t *serviceConfigImageSpecMinimalTest) Assert(typeValue builtin_argument.Ku
 	require.Nil(t, interpretationErr)
 
 	expectedImageRegistrySpec := image_registry_spec.NewImageRegistrySpec(testContainerImageName, "", "", "")
-	expectedServiceConfig, err := service.CreateServiceConfig(testContainerImageName, nil, expectedImageRegistrySpec, nil, map[string]*port_spec.PortSpec{}, map[string]*port_spec.PortSpec{}, nil, nil, map[string]string{}, nil, nil, 0, 0, service_config.DefaultPrivateIPAddrPlaceholder, 0, 0, map[string]string{}, nil, nil, map[string]string{}, image_download_mode.ImageDownloadMode_Missing, true)
+	expectedServiceConfig, err := service.CreateServiceConfig(testContainerImageName, nil, expectedImageRegistrySpec, nil, map[string]*port_spec.PortSpec{}, map[string]*port_spec.PortSpec{}, nil, nil, map[string]string{}, nil, nil, 0, 0, service_config.DefaultPrivateIPAddrPlaceholder, 0, 0, map[string]string{}, nil, nil, map[string]string{}, image_download_mode.ImageDownloadMode_Missing, true, service.WorkloadTypeStatefulSet)
 	require.NoError(t, err)
 	require.Equal(t, expectedServiceConfig, serviceConfig)
 	require.Equal(t, expectedImageRegistrySpec, serviceConfig.GetImageRegistrySpec())

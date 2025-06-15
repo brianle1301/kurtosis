@@ -19,7 +19,6 @@ import (
 const (
 	validatorContainerName    = "logs-aggregator-validator"
 	validationCmdRetries      = 0
-	validatorJobTTLSeconds    = 5
 	validatorJobPollInterval  = 600 * time.Millisecond
 	validatorJobPollTimeout   = 30 * time.Second
 	validationSuccessExitCode = 0
@@ -121,16 +120,23 @@ func (vector *vectorConfigurationCreator) CreateConfiguration(
 	var emptyJobLabels map[string]string
 	var emptyJobAnnotations map[string]string
 
+	var validatorJobTTLSeconds int32 = 5
+
 	job, err := kubernetesManager.CreateJob(
 		ctx,
 		namespaceName,
 		validatorJobName,
 		emptyJobLabels,
 		emptyJobAnnotations,
+		nil,
 		containers,
 		volumes,
 		validationCmdRetries,
-		validatorJobTTLSeconds,
+		&validatorJobTTLSeconds,
+		"",
+		nil,
+		nil,
+		nil,
 	)
 	if err != nil {
 		return nil, nil, stacktrace.Propagate(err, "An error occurred creating a job to validate logs aggregator configuration")

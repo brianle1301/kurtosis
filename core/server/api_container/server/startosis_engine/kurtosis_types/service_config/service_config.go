@@ -564,6 +564,7 @@ func (config *ServiceConfig) ToKurtosisType(
 		nodeSelectors,
 		imageDownloadMode,
 		tiniEnabled,
+		service.WorkloadTypeStatefulSet,
 	)
 	if err != nil {
 		return nil, startosis_errors.WrapWithInterpretationError(err, "An error occurred creating a service config")

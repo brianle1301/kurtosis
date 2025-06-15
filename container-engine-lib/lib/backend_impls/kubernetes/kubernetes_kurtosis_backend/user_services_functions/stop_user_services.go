@@ -33,13 +33,14 @@ func StopUserServices(
 	for serviceUuid, serviceObjsAndResources := range allObjectsAndResources {
 		resources := serviceObjsAndResources.KubernetesResources
 
-		statefulSet := resources.StatefulSet
-		if statefulSet != nil {
-			if err := kubernetesManager.RemoveStatefulSet(ctx, statefulSet); err != nil {
+		workload := resources.Workload
+		if workload != nil {
+			if err := workload.Delete(ctx, kubernetesManager); err != nil {
 				erroredUuids[serviceUuid] = stacktrace.Propagate(
 					err,
-					"An error occurred removing Kubernetes stateful set '%v' in namespace '%v'",
-					statefulSet.Name,
+					"An error occurred removing Kubernetes %s '%v' in namespace '%v'",
+					workload.ReadableType(),
+					workload.Name(),
 					namespaceName,
 				)
 				continue

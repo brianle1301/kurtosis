@@ -3,6 +3,7 @@ package kubernetes_kurtosis_backend
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_kurtosis_backend/logs_aggregator_functions"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_kurtosis_backend/logs_aggregator_functions/implementations/vector"
@@ -370,6 +371,28 @@ func (backend *KubernetesKurtosisBackend) GetUserServiceLogs(
 		backend.kubernetesManager)
 }
 
+func (backend *KubernetesKurtosisBackend) GetUserServicesOutputAndExitCode(
+	ctx context.Context,
+	enclaveUuid enclave.EnclaveUUID,
+	filters *service.ServiceFilters,
+	timeout time.Duration,
+) (
+	succesfulUserServiceExecResults map[service.ServiceUUID]*exec_result.ExecResult,
+	erroredUserServiceUuids map[service.ServiceUUID]error,
+	resultErr error,
+) {
+	return user_services_functions.GetUserServiceOutputAndExitCode(
+		ctx,
+		enclaveUuid,
+		filters,
+		timeout,
+		backend.cliModeArgs,
+		backend.apiContainerModeArgs,
+		backend.engineServerModeArgs,
+		backend.kubernetesManager,
+	)
+}
+
 func (backend *KubernetesKurtosisBackend) RunUserServiceExecCommands(
 	ctx context.Context,
 	enclaveUuid enclave.EnclaveUUID,
@@ -417,18 +440,12 @@ func (backend *KubernetesKurtosisBackend) GetShellOnUserService(ctx context.Cont
 		return stacktrace.Propagate(err, "An error occurred getting user service object & Kubernetes resources for service '%v' in enclave '%v'", serviceUuid, enclaveUuid)
 	}
 
-	statefulSet := objectAndResources.KubernetesResources.StatefulSet
-
-	pods, err := backend.kubernetesManager.GetPodsManagedByStatefulSet(ctx, statefulSet)
+	workload := objectAndResources.KubernetesResources.Workload
+	pod, err := workload.GetPod(ctx, backend.kubernetesManager)
 	if err != nil {
-		return stacktrace.Propagate(err, "An error occurred getting pods managed by stateful set '%+v'", statefulSet)
+		return stacktrace.Propagate(err, "An error occurred getting pods managed by %s '%s'", workload.ReadableType(), workload.Name())
 	}
 
-	if len(pods) != 1 {
-		return stacktrace.NewError("Found %d pods managed by stateful set %s when there should only be 1. This is likely a Kurtosis bug!", len(pods), statefulSet.Name)
-	}
-
-	pod := pods[0]
 	return backend.kubernetesManager.GetExecStream(ctx, pod)
 }
 

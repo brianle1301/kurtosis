@@ -605,6 +605,46 @@ func (network *DefaultServiceNetwork) RunExec(ctx context.Context, serviceIdenti
 		userServiceCommand, serviceIdentifier, serviceUuid)
 }
 
+func (network *DefaultServiceNetwork) GetOutputAndExitCode(ctx context.Context, serviceIdentifier string, timeout time.Duration) (*exec_result.ExecResult, error) {
+	network.mutex.Lock()
+	defer network.mutex.Unlock()
+
+	serviceRegistration, err := network.getServiceRegistrationForIdentifierUnlocked(serviceIdentifier)
+	if err != nil {
+		return nil, stacktrace.Propagate(err, "An error occurred while getting service registration for identifier '%v'", serviceIdentifier)
+	}
+
+	serviceUuid := serviceRegistration.GetUUID()
+	filters := &service.ServiceFilters{
+		Names:    nil,
+		UUIDs:    map[service.ServiceUUID]bool{serviceUuid: true},
+		Statuses: nil,
+	}
+
+	successfulExecs, failedExecs, err := network.kurtosisBackend.GetUserServicesOutputAndExitCode(ctx, network.enclaveUuid, filters, timeout)
+	if err != nil {
+		return nil, stacktrace.Propagate(err, "An error occurred getting user services output and exit code for service '%v'", serviceIdentifier)
+	}
+
+	if execResult, found := successfulExecs[serviceUuid]; found {
+		if len(failedExecs) > 0 {
+			return nil, stacktrace.NewError("An error was returned even though the get output and exit code was successful. "+
+				"This is a Kurtosis internal bug. The exec result was: '%s' (exit code %d) and the error(s) were:\n%v",
+				execResult.GetOutput(), execResult.GetExitCode(), failedExecs)
+		}
+		return execResult, nil
+	}
+
+	if err, found := failedExecs[serviceUuid]; found {
+		return nil, stacktrace.Propagate(err, "An error occurred getting output and exit code on service '%s' "+
+			"(uuid '%s')", serviceIdentifier, serviceUuid)
+	}
+
+	return nil, stacktrace.NewError("The status of the output and exit code on service '%s' (uuid '%s') is unknown. "+
+		"It did not return as a success nor as a failure. This is a Kurtosis internal bug.",
+		serviceIdentifier, serviceUuid)
+}
+
 func (network *DefaultServiceNetwork) RunExecs(ctx context.Context, userServiceCommands map[string][]string) (map[service.ServiceUUID]*exec_result.ExecResult, map[service.ServiceUUID]error, error) {
 	// NOTE: This will block all other operations while this command is running!!!! We might need to change this so it's
 	// asynchronous

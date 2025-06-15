@@ -150,7 +150,7 @@ type KubernetesManager struct {
 	// Underlying restClient configuration
 	kuberneteRestConfig *rest.Config
 	// The storage class name as specified in the `kurtosis-config.yaml`
-	storageClass string
+	StorageClass string
 }
 
 func int64Ptr(i int64) *int64 { return &i }
@@ -159,7 +159,7 @@ func NewKubernetesManager(kubernetesClientSet *kubernetes.Clientset, kuberneteRe
 	return &KubernetesManager{
 		kubernetesClientSet: kubernetesClientSet,
 		kuberneteRestConfig: kuberneteRestConfig,
-		storageClass:        storageClass,
+		StorageClass:        storageClass,
 	}
 }
 
@@ -411,7 +411,7 @@ func (manager *KubernetesManager) CreatePersistentVolumeClaim(
 				Claims: nil,
 			},
 			VolumeName:       "", // we use dynamic provisioning this should happen automagically
-			StorageClassName: &manager.storageClass,
+			StorageClassName: &manager.StorageClass,
 			VolumeMode:       nil,
 			DataSource:       nil,
 			DataSourceRef:    nil,
@@ -2618,6 +2618,18 @@ func (manager *KubernetesManager) GetStatefulSetsByLabels(ctx context.Context, n
 	return statefulSets, nil
 }
 
+func (manager *KubernetesManager) GetJobsByLabels(ctx context.Context, namespace string, jobLabels map[string]string) (*batchv1.JobList, error) {
+	jobClient := manager.kubernetesClientSet.BatchV1().Jobs(namespace)
+
+	opts := buildListOptionsFromLabels(jobLabels)
+	jobs, err := jobClient.List(ctx, opts)
+	if err != nil {
+		return nil, stacktrace.Propagate(err, "Expected to be able to get job with labels '%+v', instead a non-nil error was returned", jobLabels)
+	}
+
+	return jobs, nil
+}
+
 func (manager *KubernetesManager) GetConfigMapByLabels(ctx context.Context, namespace string, configMapLabels map[string]string) (*apiv1.ConfigMapList, error) {
 	configMapClient := manager.kubernetesClientSet.CoreV1().ConfigMaps(namespace)
 
@@ -2840,13 +2852,17 @@ func (manager *KubernetesManager) CreateJob(
 	jobName string,
 	jobLabels map[string]string,
 	jobAnnotations map[string]string,
+	initContainers []apiv1.Container,
 	containers []apiv1.Container,
 	volumes []apiv1.Volume,
 	numRetries int32,
-	ttlSecondsAfterFinished uint,
+	ttlSecondsAfterFinished *int32,
+	serviceAccountName string,
+	tolerations []apiv1.Toleration,
+	nodeSelector map[string]string,
+	affinity *apiv1.Affinity,
 ) (*batchv1.Job, error) {
 	jobsClient := manager.kubernetesClientSet.BatchV1().Jobs(namespaceName)
-	ttlSecondsAfterFinishedInt32 := int32(ttlSecondsAfterFinished)
 
 	jobMeta := metav1.ObjectMeta{
 		Name:            jobName,
@@ -2869,7 +2885,7 @@ func (manager *KubernetesManager) CreateJob(
 	}
 
 	podSpec := apiv1.PodSpec{
-		InitContainers: nil,
+		InitContainers: initContainers,
 		Containers:     containers,
 		Volumes:        volumes,
 		// We don't want Kubernetes automagically restarting our containers
@@ -2878,8 +2894,8 @@ func (manager *KubernetesManager) CreateJob(
 		TerminationGracePeriodSeconds: nil,
 		ActiveDeadlineSeconds:         nil,
 		DNSPolicy:                     "",
-		NodeSelector:                  nil,
-		ServiceAccountName:            "",
+		NodeSelector:                  nodeSelector,
+		ServiceAccountName:            serviceAccountName,
 		DeprecatedServiceAccount:      "",
 		AutomountServiceAccountToken:  nil,
 		NodeName:                      "",
@@ -2890,9 +2906,9 @@ func (manager *KubernetesManager) CreateJob(
 		ImagePullSecrets:              nil,
 		Hostname:                      "",
 		Subdomain:                     "",
-		Affinity:                      nil,
+		Affinity:                      affinity,
 		SchedulerName:                 "",
-		Tolerations:                   nil,
+		Tolerations:                   tolerations,
 		HostAliases:                   nil,
 		PriorityClassName:             "",
 		Priority:                      nil,
@@ -2924,7 +2940,7 @@ func (manager *KubernetesManager) CreateJob(
 			ObjectMeta: jobMeta,
 			Spec:       podSpec,
 		},
-		TTLSecondsAfterFinished: &ttlSecondsAfterFinishedInt32,
+		TTLSecondsAfterFinished: ttlSecondsAfterFinished,
 		Parallelism:             nil,
 		Completions:             nil,
 		ActiveDeadlineSeconds:   nil,
@@ -3027,7 +3043,8 @@ func (manager *KubernetesManager) WaitForJobCompletion(
 
 	// Wait for the Job to report completion (either failed or completed)
 
-	err := wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+	var err error
+	pollFn := func(ctx context.Context) (bool, error) {
 		job, err := jobsClient.Get(ctx, job.Name, metav1.GetOptions{
 			TypeMeta: metav1.TypeMeta{
 				Kind:       "",
@@ -3047,7 +3064,13 @@ func (manager *KubernetesManager) WaitForJobCompletion(
 		}
 
 		return false, nil
-	})
+	}
+
+	if timeout == 0 {
+		err = wait.PollUntilContextCancel(ctx, pollInterval, true, pollFn)
+	} else {
+		err = wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, pollFn)
+	}
 
 	if err != nil {
 		return stacktrace.Propagate(err, "An error occurred waiting for job %s to complete", job.Name)

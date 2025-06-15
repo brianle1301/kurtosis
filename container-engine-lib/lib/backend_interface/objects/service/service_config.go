@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_build_spec"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_download_mode"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_registry_spec"
@@ -76,9 +77,18 @@ type privateServiceConfig struct {
 	FilesToBeMoved map[string]string
 
 	TiniEnabled bool
+
+	WorkloadType WorkloadType
 }
 
-func CreateServiceConfig(containerImageName string, imageBuildSpec *image_build_spec.ImageBuildSpec, imageRegistrySpec *image_registry_spec.ImageRegistrySpec, nixBuildSpec *nix_build_spec.NixBuildSpec, privatePorts map[string]*port_spec.PortSpec, publicPorts map[string]*port_spec.PortSpec, entrypointArgs []string, cmdArgs []string, envVars map[string]string, filesArtifactExpansion *service_directory.FilesArtifactsExpansion, persistentDirectories *service_directory.PersistentDirectories, cpuAllocationMillicpus uint64, memoryAllocationMegabytes uint64, privateIPAddrPlaceholder string, minCpuMilliCpus uint64, minMemoryMegaBytes uint64, labels map[string]string, user *service_user.ServiceUser, tolerations []v1.Toleration, nodeSelectors map[string]string, imageDownloadMode image_download_mode.ImageDownloadMode, tiniEnabled bool) (*ServiceConfig, error) {
+type WorkloadType int
+
+const (
+	WorkloadTypeJob WorkloadType = iota
+	WorkloadTypeStatefulSet
+)
+
+func CreateServiceConfig(containerImageName string, imageBuildSpec *image_build_spec.ImageBuildSpec, imageRegistrySpec *image_registry_spec.ImageRegistrySpec, nixBuildSpec *nix_build_spec.NixBuildSpec, privatePorts map[string]*port_spec.PortSpec, publicPorts map[string]*port_spec.PortSpec, entrypointArgs []string, cmdArgs []string, envVars map[string]string, filesArtifactExpansion *service_directory.FilesArtifactsExpansion, persistentDirectories *service_directory.PersistentDirectories, cpuAllocationMillicpus uint64, memoryAllocationMegabytes uint64, privateIPAddrPlaceholder string, minCpuMilliCpus uint64, minMemoryMegaBytes uint64, labels map[string]string, user *service_user.ServiceUser, tolerations []v1.Toleration, nodeSelectors map[string]string, imageDownloadMode image_download_mode.ImageDownloadMode, tiniEnabled bool, workloadType WorkloadType) (*ServiceConfig, error) {
 
 	if err := ValidateServiceConfigLabels(labels); err != nil {
 		return nil, stacktrace.Propagate(err, "Invalid service config labels '%+v'", labels)
@@ -109,6 +119,7 @@ func CreateServiceConfig(containerImageName string, imageBuildSpec *image_build_
 		ImageDownloadMode:            imageDownloadMode,
 		FilesToBeMoved:               map[string]string{},
 		TiniEnabled:                  tiniEnabled,
+		WorkloadType:                 workloadType,
 	}
 	return &ServiceConfig{internalServiceConfig}, nil
 }
@@ -263,6 +274,10 @@ func (serviceConfig *ServiceConfig) GetTiniEnabled() bool {
 	return serviceConfig.privateServiceConfig.TiniEnabled
 }
 
+func (serviceConfig *ServiceConfig) GetWorkloadType() WorkloadType {
+	return serviceConfig.privateServiceConfig.WorkloadType
+}
+
 func (serviceConfig *ServiceConfig) UnmarshalJSON(data []byte) error {
 	// Suppressing exhaustruct requirement because we want an object with zero values
 	// nolint: exhaustruct
@@ -307,6 +322,7 @@ func GetEmptyServiceConfig() *ServiceConfig {
 		map[string]string{},
 		image_download_mode.ImageDownloadMode_Always,
 		false,
+		WorkloadTypeStatefulSet,
 	)
 	return emptyServiceConfig
 }

@@ -349,6 +349,19 @@ func (backend *MetricsReportingKurtosisBackend) RunUserServiceExecCommands(
 	return successfulUserServiceExecResults, erroredUserServiceUuids, nil
 }
 
+func (backend *MetricsReportingKurtosisBackend) GetUserServicesOutputAndExitCode(
+	ctx context.Context,
+	enclaveUuid enclave.EnclaveUUID,
+	filters *service.ServiceFilters,
+	timeout time.Duration,
+) (
+	successfulUserServiceExecResults map[service.ServiceUUID]*exec_result.ExecResult,
+	erroredUserServiceUuids map[service.ServiceUUID]error,
+	resultErr error,
+) {
+	return backend.underlying.GetUserServicesOutputAndExitCode(ctx, enclaveUuid, filters, timeout)
+}
+
 func (backend *MetricsReportingKurtosisBackend) RunUserServiceExecCommandWithStreamedOutput(
 	ctx context.Context,
 	enclaveUuid enclave.EnclaveUUID,

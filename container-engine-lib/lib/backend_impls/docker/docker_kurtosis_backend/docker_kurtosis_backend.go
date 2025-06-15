@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_build_spec"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_registry_spec"
@@ -312,6 +313,19 @@ func (backend *DockerKurtosisBackend) RunUserServiceExecCommands(
 	error,
 ) {
 	return user_service_functions.RunUserServiceExecCommands(ctx, enclaveUuid, containerUser, userServiceCommands, backend.dockerManager)
+}
+
+func (backend *DockerKurtosisBackend) GetUserServicesOutputAndExitCode(
+	ctx context.Context,
+	enclaveUuid enclave.EnclaveUUID,
+	filters *service.ServiceFilters,
+	timeout time.Duration,
+) (
+	successfulUserServiceExecResults map[service.ServiceUUID]*exec_result.ExecResult,
+	erroredUserServiceUuids map[service.ServiceUUID]error,
+	resultErr error,
+) {
+	return user_service_functions.GetUserServiceOutputAndExitCode(ctx, enclaveUuid, filters, timeout, backend.dockerManager)
 }
 
 func (backend *DockerKurtosisBackend) RunUserServiceExecCommandWithStreamedOutput(

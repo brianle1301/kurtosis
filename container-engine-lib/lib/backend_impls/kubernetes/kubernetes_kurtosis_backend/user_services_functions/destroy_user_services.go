@@ -50,13 +50,14 @@ func DestroyUserServices(
 				continue
 			}
 		}
-		statefulSetToRemove := resources.StatefulSet
-		if statefulSetToRemove != nil {
-			if err := kubernetesManager.RemoveStatefulSet(ctx, statefulSetToRemove); err != nil {
+
+		if resources.Workload != nil {
+			if err := resources.Workload.Delete(ctx, kubernetesManager); err != nil {
 				erroredGuids[serviceUuid] = stacktrace.Propagate(
 					err,
-					"An error occurred removing Kubernetes stateful set '%v' in namespace '%v'",
-					statefulSetToRemove.Name,
+					"An error occurred removing Kubernetes %s '%v' in namespace '%v'",
+					resources.Workload.ReadableType(),
+					resources.Workload.Name(),
 					namespaceName,
 				)
 				continue

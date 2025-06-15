@@ -280,6 +280,17 @@ type KurtosisBackend interface {
 		resultError error,
 	)
 
+	GetUserServicesOutputAndExitCode(
+		ctx context.Context,
+		enclaveUuid enclave.EnclaveUUID,
+		filters *service.ServiceFilters,
+		timeout time.Duration,
+	) (
+		successfulUserServiceExecResults map[service.ServiceUUID]*exec_result.ExecResult,
+		erroredUserServiceUuids map[service.ServiceUUID]error,
+		resultErr error,
+	)
+
 	// Executes a shell command inside an user service instance indenfified by its ID
 	RunUserServiceExecCommands(
 		ctx context.Context,

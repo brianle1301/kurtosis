@@ -2,14 +2,16 @@ package service_network
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"time"
+
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/enclave"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/exec_result"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/service"
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/service_network/render_templates"
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/service_network/service_identifiers"
 	"github.com/kurtosis-tech/kurtosis/core/server/commons/enclave_data_directory"
-	"io"
-	"net/http"
 )
 
 // ServiceNetwork handles the state of the enclave
@@ -80,6 +82,8 @@ type ServiceNetwork interface {
 	)
 
 	RunExec(ctx context.Context, serviceIdentifier string, userServiceCommand []string) (*exec_result.ExecResult, error)
+
+	GetOutputAndExitCode(ctx context.Context, serviceIdentifier string, timeout time.Duration) (*exec_result.ExecResult, error)
 
 	RunExecs(
 		ctx context.Context,
