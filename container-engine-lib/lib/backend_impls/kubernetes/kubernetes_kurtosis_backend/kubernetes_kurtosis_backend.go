@@ -3,7 +3,6 @@ package kubernetes_kurtosis_backend
 import (
 	"context"
 	"io"
-	"time"
 
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_kurtosis_backend/logs_aggregator_functions"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_kurtosis_backend/logs_aggregator_functions/implementations/vector"
@@ -369,28 +368,6 @@ func (backend *KubernetesKurtosisBackend) GetUserServiceLogs(
 		backend.apiContainerModeArgs,
 		backend.engineServerModeArgs,
 		backend.kubernetesManager)
-}
-
-func (backend *KubernetesKurtosisBackend) GetUserServicesOutputAndExitCode(
-	ctx context.Context,
-	enclaveUuid enclave.EnclaveUUID,
-	filters *service.ServiceFilters,
-	timeout time.Duration,
-) (
-	succesfulUserServiceExecResults map[service.ServiceUUID]*exec_result.ExecResult,
-	erroredUserServiceUuids map[service.ServiceUUID]error,
-	resultErr error,
-) {
-	return user_services_functions.GetUserServiceOutputAndExitCode(
-		ctx,
-		enclaveUuid,
-		filters,
-		timeout,
-		backend.cliModeArgs,
-		backend.apiContainerModeArgs,
-		backend.engineServerModeArgs,
-		backend.kubernetesManager,
-	)
 }
 
 func (backend *KubernetesKurtosisBackend) RunUserServiceExecCommands(

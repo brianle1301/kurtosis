@@ -3,9 +3,7 @@ package tasks
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/exec_result"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_build_spec"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_registry_spec"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/nix_build_spec"
@@ -228,7 +226,7 @@ func (builtin *RunShCapabilities) Interpret(locatorOfModuleInWhichThisBuiltinIsB
 	}
 
 	// build a service config from image and files artifacts expansion.
-	builtin.serviceConfig, err = getJobServiceConfig(builtin.run, maybeImageName, maybeImageBuildSpec, maybeImageRegistrySpec, maybeNixBuildSpec, filesArtifactExpansion, envVars)
+	builtin.serviceConfig, err = getServiceConfig(maybeImageName, maybeImageBuildSpec, maybeImageRegistrySpec, maybeNixBuildSpec, filesArtifactExpansion, envVars)
 	if err != nil {
 		return nil, startosis_errors.WrapWithInterpretationError(err, "An error occurred creating service config using for run sh task.")
 	}
@@ -321,8 +319,15 @@ func (builtin *RunShCapabilities) Execute(ctx context.Context, _ *builtin_argume
 		return "", stacktrace.Propagate(err, "An error occurred while creating a run_sh task with name '%v' and image '%v'", builtin.name, replacedServiceConfig.GetContainerImageName())
 	}
 
+	// create work directory and cd into that directory
+	commandToRun, err := getCommandToRun(builtin)
+	if err != nil {
+		return "", stacktrace.Propagate(err, "error occurred while preparing the sh command to execute on the image")
+	}
+	fullCommandToRun := getCommandToRunForStreamingLogs(commandToRun)
+
 	// run the command passed in by user in the container
-	runShResult, err := getExitCodeAndOutputWithWait(ctx, builtin.serviceNetwork, builtin.name, builtin.wait)
+	runShResult, err := executeWithWait(ctx, builtin.serviceNetwork, builtin.name, builtin.wait, fullCommandToRun)
 	if err != nil {
 		return "", stacktrace.Propagate(err, fmt.Sprintf("error occurred while executing one time task command: %v ", builtin.run))
 	}
@@ -359,16 +364,6 @@ func (builtin *RunShCapabilities) Execute(ctx context.Context, _ *builtin_argume
 	}
 
 	return instructionResult, err
-}
-
-func getExitCodeAndOutputWithWait(ctx context.Context, serviceNetwork service_network.ServiceNetwork, serviceName string, wait string) (*exec_result.ExecResult, error) {
-	if wait == DisableWaitTimeoutDurationStr {
-		return serviceNetwork.GetOutputAndExitCode(ctx, serviceName, 0)
-	}
-
-	// we validate timeout string during the validation stage so it cannot be invalid at this stage
-	parsedTimeout, _ := time.ParseDuration(wait)
-	return serviceNetwork.GetOutputAndExitCode(ctx, serviceName, parsedTimeout)
 }
 
 func (builtin *RunShCapabilities) TryResolveWith(instructionsAreEqual bool, _ *enclave_plan_persistence.EnclavePlanInstruction, _ *enclave_structure.EnclaveComponents) enclave_structure.InstructionResolutionStatus {
@@ -419,19 +414,7 @@ func replaceMagicStrings(runtimeValueStore *runtime_value_store.RuntimeValueStor
 		}
 	}
 
-	var cmdArgs []string
-	if serviceConfig.GetCmdArgs() != nil {
-		cmdArgs = make([]string, len(serviceConfig.GetCmdArgs()))
-		for index, cmdArg := range serviceConfig.GetCmdArgs() {
-			cmdArgWithRuntimeValueReplaced, err := magic_string_helper.ReplaceRuntimeValueInString(cmdArg, runtimeValueStore)
-			if err != nil {
-				return nil, stacktrace.Propagate(err, "Error occurred while replacing runtime value in command args for '%v'", cmdArg)
-			}
-			cmdArgs[index] = cmdArgWithRuntimeValueReplaced
-		}
-	}
-
-	renderedServiceConfig, err := service.CreateServiceConfig(serviceConfig.GetContainerImageName(), serviceConfig.GetImageBuildSpec(), serviceConfig.GetImageRegistrySpec(), serviceConfig.GetNixBuildSpec(), serviceConfig.GetPrivatePorts(), serviceConfig.GetPublicPorts(), serviceConfig.GetEntrypointArgs(), cmdArgs, envVars, serviceConfig.GetFilesArtifactsExpansion(), serviceConfig.GetPersistentDirectories(), serviceConfig.GetCPUAllocationMillicpus(), serviceConfig.GetMemoryAllocationMegabytes(), serviceConfig.GetPrivateIPAddrPlaceholder(), serviceConfig.GetMinCPUAllocationMillicpus(), serviceConfig.GetMinMemoryAllocationMegabytes(), serviceConfig.GetLabels(), serviceConfig.GetUser(), serviceConfig.GetTolerations(), serviceConfig.GetNodeSelectors(), serviceConfig.GetImageDownloadMode(), tiniEnabled, serviceConfig.GetWorkloadType())
+	renderedServiceConfig, err := service.CreateServiceConfig(serviceConfig.GetContainerImageName(), serviceConfig.GetImageBuildSpec(), serviceConfig.GetImageRegistrySpec(), serviceConfig.GetNixBuildSpec(), serviceConfig.GetPrivatePorts(), serviceConfig.GetPublicPorts(), serviceConfig.GetEntrypointArgs(), serviceConfig.GetCmdArgs(), envVars, serviceConfig.GetFilesArtifactsExpansion(), serviceConfig.GetPersistentDirectories(), serviceConfig.GetCPUAllocationMillicpus(), serviceConfig.GetMemoryAllocationMegabytes(), serviceConfig.GetPrivateIPAddrPlaceholder(), serviceConfig.GetMinCPUAllocationMillicpus(), serviceConfig.GetMinMemoryAllocationMegabytes(), serviceConfig.GetLabels(), serviceConfig.GetUser(), serviceConfig.GetTolerations(), serviceConfig.GetNodeSelectors(), serviceConfig.GetImageDownloadMode(), tiniEnabled, serviceConfig.GetWorkloadType())
 	if err != nil {
 		return nil, stacktrace.Propagate(err, "An error occurred creating a service config with env var magric strings replaced.")
 	}

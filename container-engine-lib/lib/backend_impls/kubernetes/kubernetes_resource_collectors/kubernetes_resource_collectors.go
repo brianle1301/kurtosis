@@ -6,7 +6,6 @@ import (
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/kubernetes_manager"
 	"github.com/kurtosis-tech/stacktrace"
 	v1 "k8s.io/api/apps/v1"
-	batchv1 "k8s.io/api/batch/v1"
 	apiv1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -77,24 +76,6 @@ func CollectMatchingStatefulSets(
 	error,
 ) {
 	objects, err := kubernetesManager.GetStatefulSetsByLabels(ctx, namespace, searchLabels)
-	if err != nil {
-		return nil, stacktrace.Propagate(err, "An error occurred getting Kubernetes resources matching labels: %+v", searchLabels)
-	}
-	return postFilterKubernetesResources(getListOfPointersFromListOfElements(objects.Items), postFilterLabelKey, postFilterLabelValues)
-}
-
-func CollectMatchingJobs(
-	ctx context.Context,
-	kubernetesManager *kubernetes_manager.KubernetesManager,
-	namespace string,
-	searchLabels map[string]string,
-	postFilterLabelKey string,
-	postFilterLabelValues map[string]bool,
-) (
-	map[string][]*batchv1.Job,
-	error,
-) {
-	objects, err := kubernetesManager.GetJobsByLabels(ctx, namespace, searchLabels)
 	if err != nil {
 		return nil, stacktrace.Propagate(err, "An error occurred getting Kubernetes resources matching labels: %+v", searchLabels)
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/enclave"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/exec_result"
@@ -82,8 +81,6 @@ type ServiceNetwork interface {
 	)
 
 	RunExec(ctx context.Context, serviceIdentifier string, userServiceCommand []string) (*exec_result.ExecResult, error)
-
-	GetOutputAndExitCode(ctx context.Context, serviceIdentifier string, timeout time.Duration) (*exec_result.ExecResult, error)
 
 	RunExecs(
 		ctx context.Context,

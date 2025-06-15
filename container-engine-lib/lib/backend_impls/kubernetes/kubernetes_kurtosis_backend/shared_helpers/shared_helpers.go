@@ -32,7 +32,6 @@ import (
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/concurrent_writer"
 	"github.com/kurtosis-tech/stacktrace"
 	appsv1 "k8s.io/api/apps/v1"
-	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -146,13 +145,13 @@ type ServiceWorkload interface {
 	Delete(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager) error
 }
 
-func CreateJob(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager,
+func CreatePod(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager,
 	attrs object_attributes_provider.KubernetesObjectAttributes, namespace string, initContainers []apiv1.Container,
 	containers []apiv1.Container, volumes []apiv1.Volume, serviceAccountName string, tolerations []apiv1.Toleration,
-	nodeSelector map[string]string, affinity *apiv1.Affinity) (*JobWorkload, error) {
+	nodeSelector map[string]string) (*PodWorkload, error) {
 
 	name := attrs.GetName().GetString()
-	created, err := kubernetesManager.CreateJob(
+	created, err := kubernetesManager.CreatePod(
 		ctx,
 		namespace,
 		name,
@@ -161,59 +160,44 @@ func CreateJob(ctx context.Context, kubernetesManager *kubernetes_manager.Kubern
 		initContainers,
 		containers,
 		volumes,
-		0,
-		nil,
 		serviceAccountName,
+		apiv1.RestartPolicyNever,
 		tolerations,
 		nodeSelector,
-		affinity,
 	)
 	if err != nil {
 		return nil, stacktrace.Propagate(err, "An error occurred creating job '%v'", name)
 	}
 
-	return NewJobWorkload(created), nil
+	return NewPodWorkload(created), nil
 }
 
-var _ ServiceWorkload = &JobWorkload{}
+var _ ServiceWorkload = &PodWorkload{}
 
-type JobWorkload struct {
-	job *batchv1.Job
+type PodWorkload struct {
+	pod *apiv1.Pod
 }
 
-func NewJobWorkload(job *batchv1.Job) *JobWorkload {
-	return &JobWorkload{
-		job: job,
+func NewPodWorkload(pod *apiv1.Pod) *PodWorkload {
+	return &PodWorkload{
+		pod: pod,
 	}
 }
 
-func (w *JobWorkload) Name() string {
-	return w.job.Name
+func (w *PodWorkload) Name() string {
+	return w.pod.Name
 }
 
-func (w *JobWorkload) ReadableType() string {
-	return "job"
+func (w *PodWorkload) ReadableType() string {
+	return "pod"
 }
 
-func (w *JobWorkload) GetPod(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager) (*apiv1.Pod, error) {
-	pods, err := kubernetesManager.GetPodsManagedByJob(ctx, w.job)
-	if err != nil {
-		return nil, err
-	}
-
-	return pods[0], nil
+func (w *PodWorkload) GetPod(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager) (*apiv1.Pod, error) {
+	return w.pod, nil
 }
 
-func (w *JobWorkload) WaitForCompletion(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager, pollInterval time.Duration, pollTimeout time.Duration) error {
-	if err := kubernetesManager.WaitForJobCompletion(ctx, w.job, pollInterval, pollTimeout); err != nil {
-		return stacktrace.Propagate(err, "An error occurred waiting for the job to be completed")
-	}
-
-	return nil
-}
-
-func (w *JobWorkload) Delete(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager) error {
-	return kubernetesManager.RemoveJob(ctx, w.job)
+func (w *PodWorkload) Delete(ctx context.Context, kubernetesManager *kubernetes_manager.KubernetesManager) error {
+	return kubernetesManager.RemovePod(ctx, w.pod)
 }
 
 const (
@@ -574,7 +558,7 @@ func GetUserServiceKubernetesResourcesMatchingGuids(
 		}
 	}
 
-	matchingKubernetesJobs, err := kubernetes_resource_collectors.CollectMatchingJobs(
+	matchingKubernetesPods, err := kubernetes_resource_collectors.CollectMatchingPods(
 		ctx,
 		kubernetesManager,
 		namespaceName,
@@ -585,17 +569,17 @@ func GetUserServiceKubernetesResourcesMatchingGuids(
 	if err != nil {
 		return nil, stacktrace.Propagate(err, "An error occurred getting Kubernetes pods matching service UUIDs: %+v", serviceUuids)
 	}
-	for serviceGuidStr, kubernetesJobsForGuid := range matchingKubernetesJobs {
-		logrus.Tracef("Found Kubernetes stateful sets for GUID '%v': %+v", serviceGuidStr, kubernetesJobsForGuid)
+	for serviceGuidStr, kubernetesPodsForGuid := range matchingKubernetesPods {
+		logrus.Tracef("Found Kubernetes stateful sets for GUID '%v': %+v", serviceGuidStr, kubernetesPodsForGuid)
 		serviceUuid := service.ServiceUUID(serviceGuidStr)
 
-		numJobsForGuid := len(kubernetesJobsForGuid)
+		numJobsForGuid := len(kubernetesPodsForGuid)
 		if numJobsForGuid > 1 {
 			return nil, stacktrace.NewError("Found %v Kubernetes jobs associated with service GUID '%v'; this is a bug in Kurtosis", numJobsForGuid, serviceUuid)
 		} else if numJobsForGuid == 1 {
-			job := kubernetesJobsForGuid[0]
+			pod := kubernetesPodsForGuid[0]
 
-			numContainersForJob := len(job.Spec.Template.Spec.Containers)
+			numContainersForJob := len(pod.Spec.Containers)
 			if numContainersForJob != 1 {
 				return nil, stacktrace.NewError("Found %v containers associated with service GUID '%v'; this is a bug in Kurtosis", numContainersForJob, serviceUuid)
 			}
@@ -608,7 +592,7 @@ func GetUserServiceKubernetesResourcesMatchingGuids(
 					Ingress:  nil,
 				}
 			}
-			resultObj.Workload = NewJobWorkload(job)
+			resultObj.Workload = NewPodWorkload(pod)
 			results[serviceUuid] = resultObj
 		}
 	}

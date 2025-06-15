@@ -290,22 +290,6 @@ func resultMapToString(resultMap map[string]starlark.Comparable, builtinNameForL
 	return fmt.Sprintf("Command returned with exit code '%v' and the following output: %v", exitCode, outputStr)
 }
 
-func getJobServiceConfig(
-	run string,
-	maybeImageName string,
-	maybeImageBuildSpec *image_build_spec.ImageBuildSpec,
-	maybeImageRegistrySpec *image_registry_spec.ImageRegistrySpec,
-	maybeNixBuildSpec *nix_build_spec.NixBuildSpec,
-	filesArtifactExpansion *service_directory.FilesArtifactsExpansion,
-	envVars *map[string]string,
-) (*service.ServiceConfig, error) {
-	serviceConfig, err := service.CreateServiceConfig(maybeImageName, maybeImageBuildSpec, maybeImageRegistrySpec, maybeNixBuildSpec, nil, nil, []string{"/bin/sh", "-c"}, []string{run}, *envVars, filesArtifactExpansion, nil, 0, 0, service_config.DefaultPrivateIPAddrPlaceholder, 0, 0, map[string]string{}, nil, nil, map[string]string{}, image_download_mode.ImageDownloadMode_Missing, tiniEnabled, service.WorkloadTypeJob)
-	if err != nil {
-		return nil, stacktrace.Propagate(err, "An error occurred creating service config")
-	}
-	return serviceConfig, nil
-}
-
 func getServiceConfig(
 	maybeImageName string,
 	maybeImageBuildSpec *image_build_spec.ImageBuildSpec,
@@ -314,7 +298,7 @@ func getServiceConfig(
 	filesArtifactExpansion *service_directory.FilesArtifactsExpansion,
 	envVars *map[string]string,
 ) (*service.ServiceConfig, error) {
-	serviceConfig, err := service.CreateServiceConfig(maybeImageName, maybeImageBuildSpec, maybeImageRegistrySpec, maybeNixBuildSpec, nil, nil, runCommandToStreamTaskLogs, nil, *envVars, filesArtifactExpansion, nil, 0, 0, service_config.DefaultPrivateIPAddrPlaceholder, 0, 0, map[string]string{}, nil, nil, map[string]string{}, image_download_mode.ImageDownloadMode_Missing, tiniEnabled, service.WorkloadTypeJob)
+	serviceConfig, err := service.CreateServiceConfig(maybeImageName, maybeImageBuildSpec, maybeImageRegistrySpec, maybeNixBuildSpec, nil, nil, runCommandToStreamTaskLogs, nil, *envVars, filesArtifactExpansion, nil, 0, 0, service_config.DefaultPrivateIPAddrPlaceholder, 0, 0, map[string]string{}, nil, nil, map[string]string{}, image_download_mode.ImageDownloadMode_Missing, tiniEnabled, service.WorkloadTypePod)
 	if err != nil {
 		return nil, stacktrace.Propagate(err, "An error occurred creating service config")
 	}

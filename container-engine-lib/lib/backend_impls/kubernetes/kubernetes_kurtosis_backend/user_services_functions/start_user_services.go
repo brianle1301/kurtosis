@@ -433,8 +433,8 @@ func createStartServiceOperation(
 				nodeSelectors,
 				nil,
 			)
-		} else if workloadType == service.WorkloadTypeJob {
-			workload, err = shared_helpers.CreateJob(
+		} else if workloadType == service.WorkloadTypePod {
+			workload, err = shared_helpers.CreatePod(
 				ctx,
 				kubernetesManager,
 				workloadAttrs,
@@ -445,7 +445,6 @@ func createStartServiceOperation(
 				userServiceServiceAccountName,
 				tolerations,
 				nodeSelectors,
-				nil,
 			)
 		} else {
 			panic("Invalid workload type")

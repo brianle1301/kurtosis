@@ -84,7 +84,7 @@ type privateServiceConfig struct {
 type WorkloadType int
 
 const (
-	WorkloadTypeJob WorkloadType = iota
+	WorkloadTypePod WorkloadType = iota
 	WorkloadTypeStatefulSet
 )
 
