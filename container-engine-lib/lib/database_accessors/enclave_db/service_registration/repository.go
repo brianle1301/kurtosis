@@ -2,6 +2,7 @@ package service_registration
 
 import (
 	"encoding/json"
+
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/enclave"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/service"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/database_accessors/enclave_db"
@@ -12,6 +13,10 @@ import (
 
 var (
 	serviceRegistrationBucketName = []byte("service-registration-repository")
+)
+
+const (
+	EcodeNotFound stacktrace.ErrorCode = iota
 )
 
 type ServiceRegistrationRepository struct {
@@ -306,7 +311,7 @@ func getServiceRegistrationFromBucket(bucket *bolt.Bucket, serviceName service.S
 func getServiceRegistrationFromBytes(serviceRegistrationBytes []byte, serviceName service.ServiceName) (*service.ServiceRegistration, error) {
 	// check for existence
 	if serviceRegistrationBytes == nil {
-		return nil, stacktrace.NewError("Service registration for service '%s' does not exist on the service registration repository", serviceName)
+		return nil, stacktrace.NewErrorWithCode(EcodeNotFound, "Service registration for service '%s' does not exist on the service registration repository", serviceName)
 	}
 
 	serviceRegistration := &service.ServiceRegistration{}

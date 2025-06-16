@@ -110,6 +110,8 @@ func (backend *DockerKurtosisBackend) CreateAPIContainer(
 		return nil, stacktrace.NewError("An error occurred while getting the reverse proxy enclave network IP address for enclave '%v', This is a bug in Kurtosis", enclaveUuid)
 	}
 
+	logrus.Infof("%+v", enclaveLogsCollector)
+
 	networkCidr := enclaveNetwork.GetIpAndMask()
 	alreadyTakenIps := map[string]bool{
 		networkCidr.IP.String():                                    true,

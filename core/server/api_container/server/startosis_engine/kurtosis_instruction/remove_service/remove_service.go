@@ -3,6 +3,7 @@ package remove_service
 import (
 	"context"
 	"fmt"
+
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/service"
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/service_network"
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/enclave_plan_persistence"
@@ -15,6 +16,7 @@ import (
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/startosis_errors"
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/startosis_validator"
 	"github.com/kurtosis-tech/stacktrace"
+	"github.com/sirupsen/logrus"
 	"go.starlark.net/starlark"
 )
 
@@ -84,7 +86,8 @@ func (builtin *RemoveServiceCapabilities) Interpret(_ string, arguments *builtin
 
 func (builtin *RemoveServiceCapabilities) Validate(_ *builtin_argument.ArgumentValuesSet, validatorEnvironment *startosis_validator.ValidatorEnvironment) *startosis_errors.ValidationError {
 	if validatorEnvironment.DoesServiceNameExist(builtin.serviceName) == startosis_validator.ComponentNotFound {
-		return startosis_errors.NewValidationError("There was an error validating '%v' as service name '%v' doesn't exist", RemoveServiceBuiltinName, builtin.serviceName)
+		logrus.Infof("Service '%s' doesn't exist, this command will be skipped", builtin.serviceName)
+		return nil
 	}
 	validatorEnvironment.RemoveServiceName(builtin.serviceName)
 	validatorEnvironment.RemoveServiceFromPrivatePortIDMapping(builtin.serviceName)
@@ -96,6 +99,10 @@ func (builtin *RemoveServiceCapabilities) Validate(_ *builtin_argument.ArgumentV
 func (builtin *RemoveServiceCapabilities) Execute(ctx context.Context, _ *builtin_argument.ArgumentValuesSet) (string, error) {
 	serviceUUID, err := builtin.serviceNetwork.RemoveService(ctx, string(builtin.serviceName))
 	if err != nil {
+		if stacktrace.GetCode(err) == service_network.EcodeServiceNotFound {
+			return fmt.Sprintf("Service '%s' does not exist, skipping", builtin.serviceName), nil
+		}
+
 		return "", stacktrace.Propagate(err, "Failed removing service with unexpected error")
 	}
 	instructionResult := fmt.Sprintf("Service '%s' with service UUID '%s' removed", builtin.serviceName, serviceUUID)

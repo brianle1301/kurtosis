@@ -61,6 +61,10 @@ const (
 	scanPortTimeout = 200 * time.Millisecond
 )
 
+const (
+	EcodeServiceNotFound stacktrace.ErrorCode = iota
+)
+
 type storeFilesArtifactResult struct {
 	err               error
 	filesArtifactUuid enclave_data_directory.FilesArtifactUUID
@@ -399,6 +403,9 @@ func (network *DefaultServiceNetwork) RemoveService(
 
 	serviceToRemove, err := network.serviceRegistrationRepository.Get(serviceName)
 	if err != nil {
+		if stacktrace.GetCode(err) == service_registration.EcodeNotFound {
+			return "", stacktrace.PropagateWithCode(err, EcodeServiceNotFound, "An error occurred getting the service registration for service '%s'", serviceName)
+		}
 		return "", stacktrace.Propagate(err, "An error occurred getting the service registration for service '%s'", serviceName)
 	}
 	serviceUuid := serviceToRemove.GetUUID()
@@ -1314,7 +1321,7 @@ func (network *DefaultServiceNetwork) getServiceNameForIdentifierUnlocked(servic
 		return maybeServiceName, nil
 	}
 
-	return "", stacktrace.NewError("Couldn't find a matching service name for identifier '%v'", serviceIdentifier)
+	return "", stacktrace.NewErrorWithCode(EcodeServiceNotFound, "Couldn't find a matching service name for identifier '%v'", serviceIdentifier)
 }
 
 func (network *DefaultServiceNetwork) getServiceLogs(
