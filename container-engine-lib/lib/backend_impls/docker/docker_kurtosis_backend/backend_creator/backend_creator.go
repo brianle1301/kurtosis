@@ -257,11 +257,14 @@ func getDockerKurtosisBackend(
 		}
 
 		alreadyTakenIps := map[string]bool{
-			networkIp.String():      true,
-			network.GetGatewayIp():  true,
-			apiContainerIp.String(): true,
-			logsCollectorObj.GetEnclaveNetworkIpAddress().String(): true,
-			reverseProxyEnclaveNetworkIpAddress.String():           true,
+			networkIp.String():                           true,
+			network.GetGatewayIp():                       true,
+			apiContainerIp.String():                      true,
+			reverseProxyEnclaveNetworkIpAddress.String(): true,
+		}
+
+		if logsCollectorObj != nil {
+			alreadyTakenIps[logsCollectorObj.GetEnclaveNetworkIpAddress().String()] = true
 		}
 
 		freeIpAddrProvider, err := free_ip_addr_tracker.GetOrCreateNewFreeIpAddrTracker(
