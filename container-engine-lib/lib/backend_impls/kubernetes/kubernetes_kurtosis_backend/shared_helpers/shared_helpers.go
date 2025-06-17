@@ -570,8 +570,13 @@ func GetUserServiceKubernetesResourcesMatchingGuids(
 		return nil, stacktrace.Propagate(err, "An error occurred getting Kubernetes pods matching service UUIDs: %+v", serviceUuids)
 	}
 	for serviceGuidStr, kubernetesPodsForGuid := range matchingKubernetesPods {
-		logrus.Tracef("Found Kubernetes stateful sets for GUID '%v': %+v", serviceGuidStr, kubernetesPodsForGuid)
+		logrus.Tracef("Found Kubernetes pods for GUID '%v': %+v", serviceGuidStr, kubernetesPodsForGuid)
 		serviceUuid := service.ServiceUUID(serviceGuidStr)
+
+		resultObj, found := results[serviceUuid]
+		if found && resultObj.Workload != nil {
+			continue
+		}
 
 		numJobsForGuid := len(kubernetesPodsForGuid)
 		if numJobsForGuid > 1 {
