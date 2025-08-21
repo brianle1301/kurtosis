@@ -142,7 +142,7 @@ func (vector *vectorConfigurationCreator) CreateConfiguration(
 		return nil, nil, stacktrace.Propagate(err, "An error occurred creating a job to validate logs aggregator configuration")
 	}
 
-	err = kubernetesManager.WaitForJobCompletion(ctx, job, validatorJobPollInterval, validatorJobPollTimeout)
+	err = kubernetesManager.WaitForJobCompletion(ctx, job, 60*time.Second)
 	if err != nil {
 		return nil, nil, stacktrace.Propagate(err, "An error occurred waiting for the logs aggregator validation job to finish, even after waiting %v", validatorJobPollTimeout)
 	}

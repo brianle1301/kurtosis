@@ -189,7 +189,7 @@ func createGrafanaAndLokiDeployments(ctx context.Context, k8sManager *kubernetes
 		}
 	}()
 	logrus.Infof("Waiting for Loki deployment to come online (can take around 30s)... ")
-	if err := k8sManager.WaitForPodManagedByDeployment(ctx, lokiDeployment, lokiDeploymentMaxRetries, lokiDeploymentRetryInterval); err != nil {
+	if err := k8sManager.WaitForPodManagedByDeployment(ctx, lokiDeployment, 60*time.Second); err != nil {
 		return "", nil, stacktrace.Propagate(err, "An error occurred while waiting for pod managed by Loki deployment '%v' to come online.", lokiDeploymentName)
 	}
 

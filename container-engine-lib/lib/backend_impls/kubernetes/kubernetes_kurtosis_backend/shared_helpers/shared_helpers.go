@@ -276,7 +276,7 @@ func CreateStatefulSet(ctx context.Context, kubernetesManager *kubernetes_manage
 		}
 	}()
 
-	if err := kubernetesManager.WaitForPodManagedByStatefulSet(ctx, created, workloadMaxRetries, workloadRetryInterval); err != nil {
+	if err := kubernetesManager.WaitForPodManagedByStatefulSet(ctx, created, 60*time.Second); err != nil {
 		return nil, stacktrace.Propagate(err, "An error occurred waiting for active pod managed by stateful set '%s'", name)
 	}
 

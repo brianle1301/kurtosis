@@ -513,7 +513,7 @@ func (backend *KubernetesKurtosisBackend) CreateAPIContainer(
 		}
 	}()
 
-	if err := backend.kubernetesManager.WaitForPodManagedByDeployment(ctx, apiContainerDeployment, deploymentMaxRetries, deploymentRetryInterval); err != nil {
+	if err := backend.kubernetesManager.WaitForPodManagedByDeployment(ctx, apiContainerDeployment, 60*time.Second); err != nil {
 		return nil, stacktrace.Propagate(err, "An error occurred waiting for active pod managed by deployment '%v'", apiContainerDeployment.Name)
 	}
 

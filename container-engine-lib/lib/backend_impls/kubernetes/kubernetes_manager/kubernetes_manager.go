@@ -20,12 +20,12 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_impls/kubernetes/object_attributes_provider/kubernetes_label_key"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/concurrent_writer"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/uuid_generator"
 	v1 "k8s.io/api/apps/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/exec_result"
 	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/channel_writer"
@@ -47,14 +47,11 @@ import (
 )
 
 const (
-	podWaitForAvailabilityTimeout              = 15 * time.Minute
-	podWaitForAvailabilityTimeBetweenPolls     = 500 * time.Millisecond
-	podWaitForDeletionTimeout                  = 5 * time.Minute
-	podWaitForDeletionTimeBetweenPolls         = 500 * time.Millisecond
-	podWaitForTerminationTimeout               = 5 * time.Minute
-	podWaitForTerminationTimeBetweenPolls      = 500 * time.Millisecond
-	statefulSetWaitForDeletionTimeout          = 5 * time.Minute
-	statefulSetWaitForDeletionTimeBetweenPolls = 1 * time.Second
+	podWaitForAvailabilityTimeout         = 15 * time.Minute
+	podWaitForDeletionTimeout             = 5 * time.Minute
+	podWaitForTerminationTimeout          = 5 * time.Minute
+	podWaitForTerminationTimeBetweenPolls = 500 * time.Millisecond
+	statefulSetWaitForDeletionTimeout     = 5 * time.Minute
 
 	// This is a container "reason" (machine-readable string) indicating that the container has some issue with
 	// pulling the image (usually, a typo in the image name or the image doesn't exist)
@@ -1597,34 +1594,49 @@ func (manager *KubernetesManager) CreateDeployment(
 	return createdDeployment, nil
 }
 
-func (manager *KubernetesManager) WaitForPodManagedByDeployment(ctx context.Context, deployment *v1.Deployment, maxRetries int, retryInterval time.Duration) error {
-	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(maxRetries)*retryInterval)
-	defer cancel()
+func (manager *KubernetesManager) WaitForPodManagedByDeployment(ctx context.Context, deployment *v1.Deployment, timeout time.Duration) error {
+	watcher, err := manager.kubernetesClientSet.CoreV1().Pods(deployment.Namespace).Watch(ctx, metav1.ListOptions{
+		LabelSelector: metav1.FormatLabelSelector(deployment.Spec.Selector),
+	})
+	if err != nil {
+		return stacktrace.Propagate(err, "An error occurred watching the pods managed by deployment '%v'", deployment.Name)
+	}
+	defer watcher.Stop()
 
-	ticker := time.NewTicker(retryInterval)
-	defer ticker.Stop()
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	ready := map[string]bool{}
+	timeoutCh := time.After(timeout)
+	for {
 		select {
-		case <-timeoutCtx.Done():
-			return stacktrace.NewError(
-				"Timeout waiting for a pod managed by deployment '%s' to come online",
-				deployment.Name,
-			)
-		case <-ticker.C:
-			pods, err := manager.GetPodsManagedByDeployment(ctx, deployment)
-			if err != nil {
-				return stacktrace.Propagate(err, "An error occurred getting pods managed by deployment'%v'", deployment.Name)
+		case <-timeoutCh:
+			return stacktrace.NewError("Timeout waiting for a pod managed by deployment '%s' to come online", deployment.Name)
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return stacktrace.NewError("Pods managed by deployment '%v' in namespace '%v' watch channel closed", deployment.Name, deployment.Namespace)
 			}
-			if len(pods) > 0 && len(pods[0].Status.ContainerStatuses) > 0 && pods[0].Status.ContainerStatuses[0].Ready {
-				// found a pod with a running container
+
+			pod := event.Object.(*apiv1.Pod)
+
+			// Track readiness
+			isReady := pod.Status.Phase == apiv1.PodRunning
+
+			switch event.Type {
+			case watch.Added, watch.Modified:
+				ready[pod.Name] = isReady
+			case watch.Deleted:
+				delete(ready, pod.Name)
+			}
+
+			var count int
+			for _, v := range ready {
+				if v {
+					count++
+				}
+			}
+			if int32(count) >= *deployment.Spec.Replicas {
 				return nil
 			}
 		}
 	}
-	return stacktrace.NewError(
-		"Exceeded max retries (%d) waiting for a pod managed by deployment '%s' to come online",
-		maxRetries, deployment.Name,
-	)
 }
 
 func (manager *KubernetesManager) ScaleDeployment(ctx context.Context, namespace, name string, replicas int32) error {
@@ -1825,21 +1837,31 @@ func (manager *KubernetesManager) RemoveStatefulSet(ctx context.Context, statefu
 		return stacktrace.Propagate(err, "Failed to delete stateful set with name '%s' with delete options '%+v'", statefulSet.Name, globalDeleteOptions)
 	}
 
-	err := wait.PollUntilContextTimeout(ctx, statefulSetWaitForDeletionTimeBetweenPolls, statefulSetWaitForDeletionTimeout, true, func(ctx context.Context) (bool, error) {
-		_, err := client.Get(ctx, statefulSet.Name, globalGetOptions)
-
-		if apierrors.IsNotFound(err) {
-			return true, nil
-		}
-
-		return false, err
-	})
-
+	watcher, err := client.Watch(ctx, metav1.SingleObject(metav1.ObjectMeta{
+		Name: statefulSet.Name,
+	}))
 	if err != nil {
-		return stacktrace.Propagate(err, "An error occurred waiting for stateful set %s to be fully deleted", statefulSet.Name)
+		return stacktrace.Propagate(err, "An error occurred watching the stateful set '%v' in namespace '%v'", statefulSet.Name, statefulSet.Namespace)
 	}
+	defer watcher.Stop()
 
-	return nil
+	timeoutCh := time.After(statefulSetWaitForDeletionTimeout)
+	for {
+		select {
+		case <-timeoutCh:
+			return stacktrace.NewError("Stateful set '%v' in namespace '%v' did not become deleted after %v", statefulSet.Name, statefulSet.Namespace, statefulSetWaitForDeletionTimeout)
+		case event := <-watcher.ResultChan():
+			switch event.Type {
+			case watch.Modified:
+				statefulSet := event.Object.(*v1.StatefulSet)
+				if statefulSet.DeletionTimestamp != nil {
+					logrus.Debugf("Stateful set '%v' in namespace '%v' is marked for deletion, waiting for full removal...", statefulSet.Name, statefulSet.Namespace)
+				}
+			case watch.Deleted:
+				return nil
+			}
+		}
+	}
 }
 
 func (manager *KubernetesManager) GetStatefulSet(ctx context.Context, namespace string, name string) (*v1.StatefulSet, error) {
@@ -1856,34 +1878,49 @@ func (manager *KubernetesManager) GetStatefulSet(ctx context.Context, namespace 
 	return statefulSet, nil
 }
 
-func (manager *KubernetesManager) WaitForPodManagedByStatefulSet(ctx context.Context, statefulSet *v1.StatefulSet, maxRetries int, retryInterval time.Duration) error {
-	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(maxRetries)*retryInterval)
-	defer cancel()
+func (manager *KubernetesManager) WaitForPodManagedByStatefulSet(ctx context.Context, statefulSet *v1.StatefulSet, timeout time.Duration) error {
+	watcher, err := manager.kubernetesClientSet.CoreV1().Pods(statefulSet.Namespace).Watch(ctx, metav1.ListOptions{
+		LabelSelector: metav1.FormatLabelSelector(statefulSet.Spec.Selector),
+	})
+	if err != nil {
+		return stacktrace.Propagate(err, "An error occurred watching the pods managed by stateful set '%v'", statefulSet.Name)
+	}
+	defer watcher.Stop()
 
-	ticker := time.NewTicker(retryInterval)
-	defer ticker.Stop()
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	ready := map[string]bool{}
+	timeoutCh := time.After(timeout)
+	for {
 		select {
-		case <-timeoutCtx.Done():
-			return stacktrace.NewError(
-				"Timeout waiting for a pod managed by stateful set '%s' to come online",
-				statefulSet.Name,
-			)
-		case <-ticker.C:
-			pods, err := manager.GetPodsManagedByStatefulSet(ctx, statefulSet)
-			if err != nil {
-				return stacktrace.Propagate(err, "An error occurred getting pods managed by stateful set '%v'", statefulSet.Name)
+		case <-timeoutCh:
+			return stacktrace.NewError("Timeout waiting for a pod managed by stateful set '%s' to come online", statefulSet.Name)
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return stacktrace.NewError("Pods managed by stateful set '%v' in namespace '%v' watch channel closed", statefulSet.Name, statefulSet.Namespace)
 			}
-			if len(pods) > 0 && len(pods[0].Status.ContainerStatuses) > 0 && pods[0].Status.ContainerStatuses[0].Ready {
-				// found a pod with a running container
+
+			pod := event.Object.(*apiv1.Pod)
+
+			// Track readiness
+			isReady := pod.Status.Phase == apiv1.PodRunning
+
+			switch event.Type {
+			case watch.Added, watch.Modified:
+				ready[pod.Name] = isReady
+			case watch.Deleted:
+				delete(ready, pod.Name)
+			}
+
+			var count int
+			for _, v := range ready {
+				if v {
+					count++
+				}
+			}
+			if int32(count) >= *statefulSet.Spec.Replicas {
 				return nil
 			}
 		}
 	}
-	return stacktrace.NewError(
-		"Exceeded max retries (%d) waiting for a pod managed by stateful set '%s' to come online",
-		maxRetries, statefulSet.Name,
-	)
 }
 
 func (manager *KubernetesManager) GetPodsManagedByStatefulSet(ctx context.Context, statefulSet *v1.StatefulSet) ([]*apiv1.Pod, error) {
@@ -3036,47 +3073,40 @@ func (manager *KubernetesManager) GetPodsManagedByJob(ctx context.Context, job *
 func (manager *KubernetesManager) WaitForJobCompletion(
 	ctx context.Context,
 	job *batchv1.Job,
-	pollInterval time.Duration,
 	timeout time.Duration,
 ) error {
-	jobsClient := manager.kubernetesClientSet.BatchV1().Jobs(job.Namespace)
+	watcher, err := manager.kubernetesClientSet.BatchV1().Jobs(job.Namespace).Watch(ctx, metav1.SingleObject(metav1.ObjectMeta{
+		Name: job.Name,
+	}))
+	if err != nil {
+		return stacktrace.Propagate(err, "An error occurred watching the job '%v' in namespace '%v'", job.Name, job.Namespace)
+	}
+	defer watcher.Stop()
 
-	// Wait for the Job to report completion (either failed or completed)
+	timeoutCh := time.After(timeout)
+	for {
+		select {
+		case <-timeoutCh:
+			return stacktrace.NewError("Timeout waiting for job '%s' to complete", job.Name)
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return stacktrace.NewError("Job '%v' in namespace '%v' watch channel closed", job.Name, job.Namespace)
+			}
 
-	var err error
-	pollFn := func(ctx context.Context) (bool, error) {
-		job, err := jobsClient.Get(ctx, job.Name, metav1.GetOptions{
-			TypeMeta: metav1.TypeMeta{
-				Kind:       "",
-				APIVersion: "",
-			},
-			ResourceVersion: "",
-		})
-		if err != nil {
-			return false, err
-		}
+			if event.Type != watch.Deleted {
+				job := event.Object.(*batchv1.Job)
 
-		for _, condition := range job.Status.Conditions {
-			if (condition.Type == batchv1.JobComplete && condition.Status == apiv1.ConditionTrue) ||
-				(condition.Type == batchv1.JobFailed && condition.Status == apiv1.ConditionTrue) {
-				return true, nil
+				// Wait for the Job to report completion (either failed or completed)
+
+				for _, condition := range job.Status.Conditions {
+					if (condition.Type == batchv1.JobComplete && condition.Status == apiv1.ConditionTrue) ||
+						(condition.Type == batchv1.JobFailed && condition.Status == apiv1.ConditionTrue) {
+						return nil
+					}
+				}
 			}
 		}
-
-		return false, nil
 	}
-
-	if timeout == 0 {
-		err = wait.PollUntilContextCancel(ctx, pollInterval, true, pollFn)
-	} else {
-		err = wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, pollFn)
-	}
-
-	if err != nil {
-		return stacktrace.Propagate(err, "An error occurred waiting for job %s to complete", job.Name)
-	}
-
-	return nil
 }
 
 // ====================================================================================================
@@ -3084,101 +3114,102 @@ func (manager *KubernetesManager) WaitForJobCompletion(
 // ====================================================================================================
 
 func (manager *KubernetesManager) waitForPodAvailability(ctx context.Context, namespaceName string, podName string) error {
-	// Wait for the pod to start running
-	deadline := time.Now().Add(podWaitForAvailabilityTimeout)
-	var latestPodStatus *apiv1.PodStatus
-	for time.Now().Before(deadline) {
-		pod, err := manager.GetPod(ctx, namespaceName, podName)
-		if err != nil {
-			// We shouldn't get an error on getting the pod, even if it's not ready
-			return stacktrace.Propagate(err, "An error occurred getting the just-created pod '%v'", podName)
-		}
+	watcher, err := manager.kubernetesClientSet.CoreV1().Pods(namespaceName).Watch(ctx, metav1.SingleObject(metav1.ObjectMeta{
+		Name: podName,
+	}))
+	if err != nil {
+		return stacktrace.Propagate(err, "An error occurred watching the pod '%v' in namespace '%v'", podName, namespaceName)
+	}
+	defer watcher.Stop()
 
-		latestPodStatus = &pod.Status
-		switch latestPodStatus.Phase {
-		case apiv1.PodUnknown:
-			// not impl - skipping
-		case apiv1.PodRunning:
-			return nil
-		case apiv1.PodPending:
-			for _, containerStatus := range pod.Status.ContainerStatuses {
-				containerName := containerStatus.Name
-				maybeContainerWaitingState := containerStatus.State.Waiting
-				if maybeContainerWaitingState != nil && maybeContainerWaitingState.Reason == imagePullBackOffContainerReason {
+	timeoutCh := time.After(podWaitForAvailabilityTimeout)
+	for {
+		select {
+		case <-timeoutCh:
+			return stacktrace.NewError("Pod '%v' in namespace '%v' did not become available after %v", podName, namespaceName, podWaitForAvailabilityTimeout)
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return stacktrace.NewError("Pod '%v' in namespace '%v' watch channel closed", podName, namespaceName)
+			}
+			if event.Type != watch.Deleted {
+				pod := event.Object.(*apiv1.Pod)
+				switch pod.Status.Phase {
+				case apiv1.PodUnknown:
+					// not impl - skipping
+				case apiv1.PodRunning:
+					return nil
+				case apiv1.PodPending:
+					for _, containerStatus := range pod.Status.ContainerStatuses {
+						containerName := containerStatus.Name
+						maybeContainerWaitingState := containerStatus.State.Waiting
+						if maybeContainerWaitingState != nil && maybeContainerWaitingState.Reason == imagePullBackOffContainerReason {
+							return stacktrace.NewError(
+								"Container '%v' using image '%v' in pod '%v' in namespace '%v' is stuck in state '%v'. This likely means:\n"+
+									"1) There's a typo in either the image name or the tag name\n"+
+									"2) The image isn't accessible to Kubernetes (e.g. it's a local image, or it's in a private image registry that Kubernetes can't access)\n"+
+									"3) The image's platform/architecture might not match",
+								containerName,
+								containerStatus.Image,
+								pod.Name,
+								namespaceName,
+								imagePullBackOffContainerReason,
+							)
+						}
+					}
+				case apiv1.PodFailed:
+					podStateStr := manager.getPodInfoBlockStr(ctx, namespaceName, pod)
 					return stacktrace.NewError(
-						"Container '%v' using image '%v' in pod '%v' in namespace '%v' is stuck in state '%v'. This likely means:\n"+
-							"1) There's a typo in either the image name or the tag name\n"+
-							"2) The image isn't accessible to Kubernetes (e.g. it's a local image, or it's in a private image registry that Kubernetes can't access)\n"+
-							"3) The image's platform/architecture might not match",
-						containerName,
-						containerStatus.Image,
-						pod.Name,
-						namespaceName,
-						imagePullBackOffContainerReason,
+						"Pod '%v' failed before availability with the following state:\n%v",
+						podName,
+						podStateStr,
+					)
+				case apiv1.PodSucceeded:
+					podStateStr := manager.getPodInfoBlockStr(ctx, namespaceName, pod)
+					//NOTE: We'll need to change this if we ever expect to run one-off pods
+					return stacktrace.NewError(
+						"Expected state of pod '%v' to arrive at '%v' but the pod instead landed in '%v' with the following state:\n%v",
+						podName,
+						apiv1.PodRunning,
+						apiv1.PodSucceeded,
+						podStateStr,
 					)
 				}
 			}
-		case apiv1.PodFailed:
-			podStateStr := manager.getPodInfoBlockStr(ctx, namespaceName, pod)
-			return stacktrace.NewError(
-				"Pod '%v' failed before availability with the following state:\n%v",
-				podName,
-				podStateStr,
-			)
-		case apiv1.PodSucceeded:
-			podStateStr := manager.getPodInfoBlockStr(ctx, namespaceName, pod)
-			//NOTE: We'll need to change this if we ever expect to run one-off pods
-			return stacktrace.NewError(
-				"Expected state of pod '%v' to arrive at '%v' but the pod instead landed in '%v' with the following state:\n%v",
-				podName,
-				apiv1.PodRunning,
-				apiv1.PodSucceeded,
-				podStateStr,
-			)
 		}
-		time.Sleep(podWaitForAvailabilityTimeBetweenPolls)
 	}
-
-	containerStatusStrs := renderContainerStatuses(latestPodStatus.ContainerStatuses, containerStatusLineBulletPoint)
-	return stacktrace.NewError(
-		"Pod '%v' did not become available after %v; its latest state is '%v' and status message is: %v\n"+
-			"The pod's container states are as follows:\n%v",
-		podName,
-		podWaitForAvailabilityTimeout,
-		latestPodStatus.Phase,
-		latestPodStatus.Message,
-		strings.Join(containerStatusStrs, "\n"),
-	)
 }
 
 // waitForPodDeletion waits for the pod to be fully deleted if it has been marked for deletion
 func (manager *KubernetesManager) waitForPodDeletion(ctx context.Context, namespaceName string, podName string) error {
-	// Wait for the pod to start running
-	deadline := time.Now().Add(podWaitForDeletionTimeout)
-	var latestPodStatus *apiv1.PodStatus
-	for time.Now().Before(deadline) {
-		pod, err := manager.GetPod(ctx, namespaceName, podName)
-		if err != nil {
-			// If an error has been returned, it's likely the pod does not exist. Continue
-			return nil
-		}
-		if pod.DeletionTimestamp == nil {
-			return stacktrace.NewError("The pod '%s' currently exists in namespace '%s' and is not scheduled for deletion",
-				podName, namespaceName)
-		}
-		time.Sleep(podWaitForDeletionTimeBetweenPolls)
+	watcher, err := manager.kubernetesClientSet.CoreV1().Pods(namespaceName).Watch(ctx, metav1.SingleObject(metav1.ObjectMeta{
+		Name: podName,
+	}))
+	if err != nil {
+		return stacktrace.Propagate(err, "An error occurred watching the pod '%v' in namespace '%v'", podName, namespaceName)
 	}
+	defer watcher.Stop()
 
-	containerStatusStrs := renderContainerStatuses(latestPodStatus.ContainerStatuses, containerStatusLineBulletPoint)
-	return stacktrace.NewError(
-		"Pod '%v' wasn't deleted after %v; its latest state is '%v' and status message is: %v\n"+
-			"The pod's container states are as follows:\n%v",
-		podName,
-		podWaitForAvailabilityTimeout,
-		latestPodStatus.Phase,
-		latestPodStatus.Message,
-		strings.Join(containerStatusStrs, "\n"),
-	)
+	timeoutCh := time.After(podWaitForDeletionTimeout)
+	for {
+		select {
+		case <-timeoutCh:
+			return stacktrace.NewError("Pod '%v' in namespace '%v' did not become deleted after %v", podName, namespaceName, podWaitForDeletionTimeout)
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return stacktrace.NewError("Pod '%v' in namespace '%v' watch channel closed", podName, namespaceName)
+			}
+
+			switch event.Type {
+			case watch.Modified:
+				pod := event.Object.(*apiv1.Pod)
+				if pod.DeletionTimestamp != nil {
+					logrus.Debugf("Pod '%v' in namespace '%v' is marked for deletion, waiting for full removal...", podName, namespaceName)
+				}
+			case watch.Deleted:
+				return nil
+			}
+		}
+	}
 }
 
 func (manager *KubernetesManager) WaitForPodTermination(ctx context.Context, namespaceName string, podName string) error {

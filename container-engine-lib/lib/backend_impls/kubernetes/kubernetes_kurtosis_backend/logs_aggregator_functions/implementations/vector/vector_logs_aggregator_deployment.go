@@ -136,7 +136,7 @@ func (logsAggregator *vectorLogsAggregatorResourcesManager) CreateAndStart(
 		}
 	}()
 
-	if err = kubernetesManager.WaitForPodManagedByDeployment(ctx, deployment, maxRetries, retryInterval); err != nil {
+	if err = kubernetesManager.WaitForPodManagedByDeployment(ctx, deployment, 60*time.Second); err != nil {
 		return nil, nil, nil, nil, nil, stacktrace.Propagate(err, "An error occurred waiting for active pod managed by logs aggregator deployment '%v'", deployment.Name)
 	}
 
@@ -426,7 +426,7 @@ func (vector *vectorLogsAggregatorResourcesManager) Clean(ctx context.Context, l
 	}
 
 	// before continuing, ensure logs aggregator is up again
-	if err := kubernetesManager.WaitForPodManagedByDeployment(ctx, logsAggregatorDeployment, maxRetries, retryInterval); err != nil {
+	if err := kubernetesManager.WaitForPodManagedByDeployment(ctx, logsAggregatorDeployment, 60*time.Second); err != nil {
 		return stacktrace.Propagate(err, "An error occurred waiting for a pod managed by deployment '%v' to become available.", logsAggregatorDeployment.Name)
 	}
 
