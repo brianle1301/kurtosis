@@ -228,9 +228,9 @@ func CreateStatefulSet(ctx context.Context, kubernetesManager *kubernetes_manage
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "data",
 					Annotations: map[string]string{
-						"resize.topolvm.io/threshold":        "40%",
-						"resize.topolvm.io/inodes-threshold": "15%",
-						"resize.topolvm.io/increase":         "100%",
+						"resize.topolvm.io/threshold":        "15%",
+						"resize.topolvm.io/inodes-threshold": "20%",
+						"resize.topolvm.io/increase":         "64Gi",
 						"resize.topolvm.io/storage_limit":    "2000Gi",
 					},
 				},
